@@ -42,6 +42,16 @@ data class EventImpactAnalysis(
     val providerUsed: String
 )
 
+data class NarrativeAiBrief(
+    val clusterId: String,
+    val executiveSummary: String,
+    val dominantDriver: String,
+    val conflictResolutionThesis: String,
+    val crossAssetTransmission: String,
+    val attentionForecast: String,
+    val providerUsed: String
+)
+
 data class FactoryAiProposal(
     val name: String,
     val rationale: String,
@@ -87,6 +97,16 @@ class MultiProviderAiGateway {
             "affectedClasses" to Schema.array(Schema.string(), description = "Affected asset classes"),
             "directionalBias" to Schema.string(description = "Cross-asset market bias"),
             "riskMitigationAction" to Schema.string(description = "Deterministic risk recommendation")
+        )
+    )
+
+    private val narrativeSchema = Schema.obj(
+        properties = mapOf(
+            "executiveSummary" to Schema.string(description = "2-sentence synthesis of how this narrative is evolving"),
+            "dominantDriver" to Schema.string(description = "Core fundamental or geopolitical catalyst driving attention"),
+            "conflictResolutionThesis" to Schema.string(description = "How conflicting news reports reconcile and what resolves them"),
+            "crossAssetTransmission" to Schema.string(description = "Specific transmission path across linked instruments"),
+            "attentionForecast" to Schema.string(description = "Whether narrative velocity is still accelerating or approaching decay/exhaustion")
         )
     )
 
@@ -183,6 +203,53 @@ class MultiProviderAiGateway {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Event impact analysis failed", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun analyzeNarrativeCluster(
+        clusterId: String,
+        narrativeContext: String,
+        settings: ProviderSettings
+    ): Result<NarrativeAiBrief> {
+        val prompt = """
+            You are AETHERION MACRO INTEL, ARBITER & PATTERN DNA.
+            Synthesize this live market narrative cluster, conflicting news claims, and cross-asset price reactions:
+            $narrativeContext
+
+            Provide sharp institutional insight explaining:
+            1. Executive summary of the narrative arc.
+            2. Dominant macro/structural driver.
+            3. Conflict resolution thesis (reconcile the opposing reports if any exist).
+            4. Cross-asset transmission mechanism across relevant instruments.
+            5. Attention forecast (expansion vs priced-in exhaustion/decay).
+        """.trimIndent()
+
+        return try {
+            val raw = executeStructuredCall(
+                prompt = prompt,
+                geminiSchema = narrativeSchema,
+                jsonKeysHint = "executiveSummary, dominantDriver, conflictResolutionThesis, crossAssetTransmission, attentionForecast",
+                settings = settings
+            )
+            val json = JSONObject(extractJsonObject(raw))
+            Result.success(
+                NarrativeAiBrief(
+                    clusterId = clusterId,
+                    executiveSummary = json.optString("executiveSummary", "Narrative under active monitoring."),
+                    dominantDriver = json.optString("dominantDriver", "Multi-source macro catalyst."),
+                    conflictResolutionThesis = json.optString("conflictResolutionThesis", "Monitor next confirmed wire/data print for resolution."),
+                    crossAssetTransmission = json.optString("crossAssetTransmission", "Cross-asset repricing via yields, USD & commodity risk premia."),
+                    attentionForecast = json.optString("attentionForecast", "Moderate half-life decay expected barring fresh escalation."),
+                    providerUsed = resolveProviderLabel(settings)
+                )
+            )
+        } catch (e: TimeoutCancellationException) {
+            Result.failure(IllegalStateException("Narrative AI synthesis timed out after 60s."))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Narrative cluster analysis failed", e)
             Result.failure(e)
         }
     }

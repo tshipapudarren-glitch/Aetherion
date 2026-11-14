@@ -30,6 +30,7 @@ import com.example.data.remote.MultiProviderAiGateway
 import com.example.data.remote.VoiceApisClient
 import com.example.domain.engine.AetherEventBus
 import com.example.domain.engine.DeterministicRiskEngine
+import com.example.domain.engine.NarrativeIntelligenceEngine
 import com.example.domain.engine.QuantitativeEngines
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -372,14 +373,44 @@ class AetherionViewModel(
 
     fun refreshHeadlines() {
         viewModelScope.launch {
+            _state.update { it.copy(isRefreshingNarratives = true) }
             marketService.fetchLiveMacroHeadlines(_state.value.providerSettings)
                 .onSuccess { list ->
-                    _state.update { it.copy(headlines = list, headlineError = null) }
+                    val snapshot = NarrativeIntelligenceEngine.analyzeNarratives(
+                        headlines = list,
+                        quotes = _state.value.quotes
+                    )
+                    val chosenId = _state.value.selectedNarrativeId
+                        ?.takeIf { id -> snapshot.clusters.any { it.id == id } }
+                        ?: snapshot.clusters.firstOrNull()?.id
+                    _state.update {
+                        it.copy(
+                            headlines = list,
+                            headlineError = null,
+                            narrativeSnapshot = snapshot,
+                            selectedNarrativeId = chosenId,
+                            isRefreshingNarratives = false
+                        )
+                    }
+                    eventBus.publish(
+                        "OMNISENSE", "EVENT_ENGINE", "NARRATIVES_CLUSTERED",
+                        "${snapshot.clusters.size} narratives · ${snapshot.totalConflictsDetected} conflicts · Top: ${snapshot.fastestGrowingNarrative}",
+                        severity = if (snapshot.totalConflictsDetected >= 3) "ALERT" else "INFO"
+                    )
                 }
                 .onFailure { e ->
-                    _state.update { it.copy(headlineError = e.localizedMessage ?: "RSS/News feed unreachable") }
+                    _state.update {
+                        it.copy(
+                            headlineError = e.localizedMessage ?: "RSS/News feed unreachable",
+                            isRefreshingNarratives = false
+                        )
+                    }
                 }
         }
+    }
+
+    fun selectNarrativeCluster(clusterId: String) {
+        _state.update { it.copy(selectedNarrativeId = clusterId) }
     }
 
     private fun recomputeDerivedAnalytics() {
@@ -427,13 +458,26 @@ class AetherionViewModel(
             )
         } else null
 
+        val narrativeSnap = if (current.headlines.isNotEmpty()) {
+            NarrativeIntelligenceEngine.analyzeNarratives(
+                headlines = current.headlines,
+                quotes = current.quotes
+            )
+        } else current.narrativeSnapshot
+
+        val activeNarrativeId = current.selectedNarrativeId
+            ?.takeIf { id -> narrativeSnap.clusters.any { it.id == id } }
+            ?: narrativeSnap.clusters.firstOrNull()?.id
+
         _state.update {
             it.copy(
                 multiverseReport = multiverse,
                 blackSwanAlerts = blackSwan,
                 currencyStrengths = strengths,
                 allocations = allocations,
-                activeBacktest = backtest
+                activeBacktest = backtest,
+                narrativeSnapshot = narrativeSnap,
+                selectedNarrativeId = activeNarrativeId
             )
         }
     }
@@ -1262,6 +1306,64 @@ class AetherionViewModel(
                 }
                 .onFailure { err ->
                     _state.update { it.copy(eventImpactState = AiTaskState.Error(err.localizedMessage ?: "Impact analysis failed")) }
+                }
+        }
+    }
+
+    fun analyzeSelectedNarrativeWithAi(clusterId: String? = _state.value.selectedNarrativeId) {
+        val snap = _state.value.narrativeSnapshot
+        val cluster = snap.clusters.find { it.id == clusterId } ?: snap.clusters.firstOrNull()
+        if (cluster == null) {
+            _state.update {
+                it.copy(narrativeAiBriefState = AiTaskState.Error("No active narrative cluster available. Refresh live feeds first."))
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _state.update { it.copy(narrativeAiBriefState = AiTaskState.Loading) }
+            val sourcesSummary = cluster.sourceComparisons.take(5).joinToString("; ") {
+                "${it.sourceName} (${it.articleCount} arts, sent=${String.format(Locale.US, "%+.2f", it.avgSentiment)}): ${it.leadHeadline}"
+            }
+            val conflictsSummary = cluster.conflictingReports.take(3).joinToString("\n") { c ->
+                "Conflict [${c.conflictAxis}]: ${c.sourceA}='${c.headlineA}' VS ${c.sourceB}='${c.headlineB}'"
+            }.ifBlank { "No sharp binary source contradictions detected; framing variance is mild." }
+            val reactionsSummary = cluster.marketReactions.take(4).joinToString("; ") { m ->
+                "${m.symbol} ${String.format(Locale.US, "%+.2f%%", m.priceChangePct)} (Vol ${String.format(Locale.US, "%.1f%%", m.realizedVolPct)}, Align ${m.alignmentScorePct}%: ${m.regimeVerdict})"
+            }
+            val context = """
+                Narrative Topic: ${cluster.topicTitle} (${cluster.categoryTag})
+                Lifecycle: ${cluster.lifecycleStage.label} | Attention: ${cluster.attentionScore}/100 | Growth Velocity: ${cluster.growthRatePct}%
+                Decay Telemetry: Half-Life ${String.format(Locale.US, "%.1fh", cluster.decayTelemetry.halfLifeHours)}, Decay Progress ${cluster.decayTelemetry.decayProgressPct}% (${cluster.decayTelemetry.statusLabel})
+                Net Sentiment: ${cluster.sentimentLabel}
+                Sources Coverage: $sourcesSummary
+                Conflicting Reports:
+                $conflictsSummary
+                Live Market Reactions: $reactionsSummary
+            """.trimIndent()
+
+            aiGateway.analyzeNarrativeCluster(cluster.id, context, _state.value.providerSettings)
+                .onSuccess { brief ->
+                    _state.update { it.copy(narrativeAiBriefState = AiTaskState.Success(brief)) }
+                    saveMemoryEntry(
+                        tier = MemoryTier.MARKET_MEMORY,
+                        title = "Narrative Brief · ${cluster.topicTitle}",
+                        content = "${brief.executiveSummary}\nConflicts: ${brief.conflictResolutionThesis}\nAssets: ${brief.crossAssetTransmission}",
+                        symbol = cluster.instrumentImpacts.firstOrNull()?.symbol ?: "GLOBAL",
+                        agentName = "MACRO INTEL",
+                        confidence = (cluster.attentionScore / 100.0).coerceIn(0.4, 0.96)
+                    )
+                    recordAudit(
+                        "NARRATIVE_ENGINE", "MACRO INTEL",
+                        "Synthesized AI narrative brief for ${cluster.topicTitle}",
+                        AuditOutcome.INFO,
+                        "Provider: ${brief.providerUsed} · Growth ${cluster.growthRatePct}% · Conflicts ${cluster.conflictingReports.size}"
+                    )
+                }
+                .onFailure { err ->
+                    _state.update {
+                        it.copy(narrativeAiBriefState = AiTaskState.Error(err.localizedMessage ?: "Narrative AI synthesis failed"))
+                    }
                 }
         }
     }

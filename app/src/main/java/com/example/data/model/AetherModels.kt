@@ -404,7 +404,11 @@ data class NewsHeadline(
     val title: String,
     val source: String,
     val publishedAt: String,
-    val link: String
+    val link: String,
+    val publishedEpochMs: Long = 0L,
+    val summary: String = "",
+    val sourceCategory: String = "Wire",
+    val region: String = "Global"
 )
 
 data class MacroIndicator(

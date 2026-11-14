@@ -85,6 +85,7 @@ import com.example.ui.screens.LiveMarketConditionsScreen
 import com.example.ui.screens.MarketTimeReconstructionScreen
 import com.example.ui.screens.ModulesDirectoryScreen
 import com.example.ui.screens.MultiverseSimulatorScreen
+import com.example.ui.screens.NarrativeIntelligenceScreen
 import com.example.ui.screens.OvermindScreen
 import com.example.ui.screens.QuantumAllocatorScreen
 import com.example.ui.screens.RiskDefenceMatrixScreen
@@ -116,6 +117,7 @@ import kotlinx.coroutines.flow.callbackFlow
 
 const val ROUTE_COMMAND_CENTRE = "command_centre"
 const val ROUTE_MARKET_CONDITIONS = "market_conditions"
+const val ROUTE_NARRATIVE_INTELLIGENCE = "narrative_intelligence"
 const val ROUTE_MODULES_DIRECTORY = "modules_directory"
 const val ROUTE_OVERMIND = "overmind"
 const val ROUTE_RISK_MATRIX = "risk_matrix"
@@ -401,6 +403,9 @@ private fun AetherionAppShell(
                                 onToggleAutonomousCycle = { viewModel.toggleAutonomousCycle() },
                                 onToggleKillSwitch = { viewModel.toggleEmergencyKillSwitch(it) },
                                 onOpenConditions = { navigateTopTab(ROUTE_MARKET_CONDITIONS) },
+                                onOpenNarratives = {
+                                    navController.navigate(ROUTE_NARRATIVE_INTELLIGENCE) { launchSingleTop = true }
+                                },
                                 onOpenModule = ::openModule
                             )
                         }
@@ -414,9 +419,23 @@ private fun AetherionAppShell(
                             )
                         }
 
+                        composable(ROUTE_NARRATIVE_INTELLIGENCE) {
+                            NarrativeIntelligenceScreen(
+                                state = state,
+                                onSelectCluster = { viewModel.selectNarrativeCluster(it) },
+                                onSelectSymbol = { viewModel.selectSymbol(it) },
+                                onRefreshNarratives = { viewModel.refreshHeadlines() },
+                                onAnalyzeNarrativeWithAi = { viewModel.analyzeSelectedNarrativeWithAi(it) },
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
                         composable(ROUTE_MODULES_DIRECTORY) {
                             ModulesDirectoryScreen(
                                 state = state,
+                                onOpenNarratives = {
+                                    navController.navigate(ROUTE_NARRATIVE_INTELLIGENCE) { launchSingleTop = true }
+                                },
                                 onOpenModule = ::openModule
                             )
                         }
@@ -559,6 +578,9 @@ private fun AetherionAppShell(
                                     state = state,
                                     onRefreshHeadlines = { viewModel.refreshHeadlines() },
                                     onAnalyzeHeadline = { viewModel.analyzeHeadlineImpact(it) },
+                                    onOpenNarratives = {
+                                        navController.navigate(ROUTE_NARRATIVE_INTELLIGENCE) { launchSingleTop = true }
+                                    },
                                     onBack = onBack
                                 )
                                 VipModuleId.AUTONOMOUS_STRATEGY_FACTORY -> AutonomousStrategyFactoryScreen(

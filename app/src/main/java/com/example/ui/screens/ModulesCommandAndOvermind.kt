@@ -948,6 +948,7 @@ fun GlobalEventImpactScreen(
     state: AetherDashboardState,
     onRefreshHeadlines: () -> Unit,
     onAnalyzeHeadline: (String) -> Unit,
+    onOpenNarratives: () -> Unit = {},
     onBack: () -> Unit
 ) {
     var customHeadline by remember { mutableStateOf("") }
@@ -958,6 +959,32 @@ fun GlobalEventImpactScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item { ModuleHeader(VipModuleId.GLOBAL_EVENT_IMPACT_ENGINE, onBack) }
+
+        item {
+            val nar = state.narrativeSnapshot
+            GlassCard(
+                borderColor = IceTelemetry.copy(alpha = 0.55f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("module13_open_narratives_card")
+            ) {
+                Text("NARRATIVE & ATTENTION INTELLIGENCE ENGINE", style = MaterialTheme.typography.titleSmall, color = MetallicGoldBright)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${nar.clusters.size} topic clusters · ${nar.totalSourcesCount} sources compared · ${nar.totalConflictsDetected} conflicting reports · Attention ${nar.globalAttentionIndex}/100",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ChampagneSecondary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onOpenNarratives,
+                    border = BorderStroke(1.dp, IceTelemetry),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text("Open Narrative Clustering, Decay & Reaction Matrix →", color = IceTelemetry)
+                }
+            }
+        }
 
         item {
             GlassCard(borderColor = MetallicGold.copy(alpha = 0.45f)) {
@@ -1046,7 +1073,7 @@ fun GlobalEventImpactScreen(
                         Text("${news.source} · ${news.publishedAt}", style = MaterialTheme.typography.labelSmall, color = SlateMuted, modifier = Modifier.weight(1f))
                         OutlinedButton(
                             onClick = { onAnalyzeHeadline(news.title) },
-                            modifier = Modifier.height(40.dp)
+                            modifier = Modifier.height(48.dp)
                         ) {
                             Text("Assess", style = MaterialTheme.typography.labelSmall)
                         }

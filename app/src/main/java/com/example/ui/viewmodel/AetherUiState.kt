@@ -20,12 +20,14 @@ import com.example.data.remote.CouncilVoteResult
 import com.example.data.remote.ElevenLabsVoiceProfile
 import com.example.data.remote.EventImpactAnalysis
 import com.example.data.remote.GeminiLiveUiState
+import com.example.data.remote.NarrativeAiBrief
 import com.example.data.remote.VoiceApisClient
 import com.example.domain.engine.AllocationSlice
 import com.example.domain.engine.BacktestReport
 import com.example.domain.engine.BlackSwanTelemetry
 import com.example.domain.engine.CurrencyStrengthItem
 import com.example.domain.engine.MultiverseScenarioReport
+import com.example.domain.engine.NarrativeIntelligenceSnapshot
 
 sealed interface AiTaskState<out T> {
     data object Idle : AiTaskState<Nothing>
@@ -78,6 +80,10 @@ data class AetherDashboardState(
     val headlines: List<NewsHeadline> = emptyList(),
     val headlineError: String? = null,
     val eventImpactState: AiTaskState<EventImpactAnalysis> = AiTaskState.Idle,
+    val narrativeSnapshot: NarrativeIntelligenceSnapshot = NarrativeIntelligenceSnapshot(),
+    val selectedNarrativeId: String? = null,
+    val isRefreshingNarratives: Boolean = false,
+    val narrativeAiBriefState: AiTaskState<NarrativeAiBrief> = AiTaskState.Idle,
     val factoryStatusMessage: String = "Ready to discover & evolve quantitative candidates.",
     val isFactoryRunning: Boolean = false,
     val memorySynthesisState: AiTaskState<String> = AiTaskState.Idle,

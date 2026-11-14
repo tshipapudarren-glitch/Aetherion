@@ -770,59 +770,131 @@ class LiveMarketDataService {
     suspend fun fetchLiveMacroHeadlines(
         settings: ProviderSettings = ProviderSettings()
     ): Result<List<NewsHeadline>> = withContext(Dispatchers.IO) {
-        val merged = mutableListOf<NewsHeadline>()
         val fhKey = ApiSecretsResolver.resolveFinnhubKey(settings)
-        if (fhKey.isNotBlank()) {
-            merged.addAll(fetchFinnhubNews(fhKey))
-        }
         val fmpKey = ApiSecretsResolver.resolveFmpKey(settings)
-        if (fmpKey.isNotBlank()) {
-            merged.addAll(fetchFmpNews(fmpKey))
-        }
 
-        val url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GC=F,BTC-USD,EURUSD=X,^GSPC&region=US&lang=en-US"
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Android; AETHERION/1.0)")
-            .build()
-        try {
-            client.newCall(request).execute().use { response ->
-                val xml = response.body?.string().orEmpty()
-                if (response.isSuccessful && xml.isNotBlank()) {
-                    merged.addAll(parseRss(xml))
+        val rssFeeds = listOf(
+            FeedSpec(
+                url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GC=F,CL=F,BZ=F,^GSPC,^NDX,^TNX&region=US&lang=en-US",
+                sourceName = "Yahoo Finance Macro",
+                category = "Markets",
+                region = "Global"
+            ),
+            FeedSpec(
+                url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=EURUSD=X,USDJPY=X,BTC-USD,ETH-USD,SOL-USD&region=US&lang=en-US",
+                sourceName = "Yahoo FX & Crypto",
+                category = "FX/Crypto",
+                region = "Global"
+            ),
+            FeedSpec(
+                url = "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
+                sourceName = "CNBC Finance",
+                category = "Financial Wire",
+                region = "North America"
+            ),
+            FeedSpec(
+                url = "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100727362",
+                sourceName = "CNBC World Markets",
+                category = "Global Macro",
+                region = "Global"
+            ),
+            FeedSpec(
+                url = "https://feeds.bbci.co.uk/news/business/rss.xml",
+                sourceName = "BBC Business",
+                category = "Broadcaster",
+                region = "Europe / UK"
+            ),
+            FeedSpec(
+                url = "https://feeds.bbci.co.uk/news/world/rss.xml",
+                sourceName = "BBC World Geopolitics",
+                category = "Geopolitics",
+                region = "Global"
+            )
+        )
+
+        val merged = coroutineScope {
+            val apiJobs = buildList {
+                if (fhKey.isNotBlank()) {
+                    add(async(Dispatchers.IO) { fetchFinnhubNews(fhKey, "general") })
+                    add(async(Dispatchers.IO) { fetchFinnhubNews(fhKey, "forex") })
+                }
+                if (fmpKey.isNotBlank()) {
+                    add(async(Dispatchers.IO) { fetchFmpNews(fmpKey) })
+                }
+                rssFeeds.forEach { spec ->
+                    add(async(Dispatchers.IO) { fetchRssFeed(spec) })
                 }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Yahoo RSS failed: ${e.message}")
+            apiJobs.awaitAll().flatten()
         }
 
-        if (merged.isEmpty()) {
-            Result.failure(IllegalStateException("No headlines retrieved from Finnhub, FMP, or Yahoo Finance RSS."))
+        val normalized = merged
+            .filter { it.title.isNotBlank() }
+            .distinctBy { it.title.lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "").take(64) }
+            .sortedByDescending { it.publishedEpochMs }
+            .take(64)
+
+        if (normalized.isEmpty()) {
+            Result.failure(IllegalStateException("No headlines retrieved from Finnhub, FMP, CNBC, BBC, or Yahoo Finance feeds."))
         } else {
-            Result.success(merged.distinctBy { it.title }.take(20))
+            Result.success(normalized)
         }
     }
 
-    private fun fetchFinnhubNews(apiKey: String): List<NewsHeadline> {
+    private data class FeedSpec(
+        val url: String,
+        val sourceName: String,
+        val category: String,
+        val region: String
+    )
+
+    private fun fetchRssFeed(spec: FeedSpec): List<NewsHeadline> {
+        return try {
+            val request = Request.Builder()
+                .url(spec.url)
+                .header("User-Agent", "Mozilla/5.0 (Android; AETHERION/1.0)")
+                .build()
+            client.newCall(request).execute().use { response ->
+                val xml = response.body?.string().orEmpty()
+                if (response.isSuccessful && xml.isNotBlank()) {
+                    parseRss(xml, spec.sourceName, spec.category, spec.region)
+                } else {
+                    emptyList()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "${spec.sourceName} RSS failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun fetchFinnhubNews(apiKey: String, category: String): List<NewsHeadline> {
         return try {
             val req = Request.Builder()
-                .url("https://finnhub.io/api/v1/news?category=general&token=$apiKey")
+                .url("https://finnhub.io/api/v1/news?category=$category&token=$apiKey")
                 .build()
             client.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful || !body.trimStart().startsWith("[")) return emptyList()
                 val arr = JSONArray(body)
                 val out = mutableListOf<NewsHeadline>()
-                for (i in 0 until minOf(arr.length(), 8)) {
+                val now = System.currentTimeMillis()
+                for (i in 0 until minOf(arr.length(), 10)) {
                     val obj = arr.getJSONObject(i)
-                    val headline = obj.optString("headline")
+                    val headline = obj.optString("headline").trim()
                     if (headline.isNotBlank()) {
+                        val unixSec = obj.optLong("datetime", 0L)
+                        val epochMs = if (unixSec > 0L) unixSec * 1000L else now - i * 900_000L
                         out.add(
                             NewsHeadline(
                                 title = headline,
-                                source = "Finnhub · ${obj.optString("source", "Wire")}",
-                                publishedAt = "Live API",
-                                link = obj.optString("url", "")
+                                source = "Finnhub · ${obj.optString("source", "Wire").ifBlank { "Wire" }}",
+                                publishedAt = formatRelativeTimeLabel(epochMs),
+                                link = obj.optString("url", ""),
+                                publishedEpochMs = epochMs,
+                                summary = obj.optString("summary", "").take(220),
+                                sourceCategory = category.uppercase(Locale.US),
+                                region = "Global"
                             )
                         )
                     }
@@ -837,23 +909,30 @@ class LiveMarketDataService {
     private fun fetchFmpNews(apiKey: String): List<NewsHeadline> {
         return try {
             val req = Request.Builder()
-                .url("https://financialmodelingprep.com/api/v3/fmp/articles?page=0&size=8&apikey=$apiKey")
+                .url("https://financialmodelingprep.com/api/v3/fmp/articles?page=0&size=10&apikey=$apiKey")
                 .build()
             client.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful || body.isBlank()) return emptyList()
                 val arr = JSONObject(body).optJSONArray("content") ?: return emptyList()
                 val out = mutableListOf<NewsHeadline>()
+                val now = System.currentTimeMillis()
                 for (i in 0 until arr.length()) {
                     val obj = arr.getJSONObject(i)
-                    val title = obj.optString("title")
+                    val title = obj.optString("title").trim()
                     if (title.isNotBlank()) {
+                        val dateStr = obj.optString("date", "")
+                        val epochMs = parseDateToEpochMs(dateStr) ?: (now - i * 1_800_000L)
                         out.add(
                             NewsHeadline(
                                 title = title,
                                 source = "FMP Research Wire",
-                                publishedAt = obj.optString("date", "Live API"),
-                                link = obj.optString("link", "")
+                                publishedAt = dateStr.ifBlank { formatRelativeTimeLabel(epochMs) },
+                                link = obj.optString("link", ""),
+                                publishedEpochMs = epochMs,
+                                summary = obj.optString("content", "").replace(Regex("<[^>]*>"), " ").trim().take(220),
+                                sourceCategory = "Institutional Research",
+                                region = "North America"
                             )
                         )
                     }
@@ -946,7 +1025,12 @@ class LiveMarketDataService {
         }
     }
 
-    private fun parseRss(xml: String): List<NewsHeadline> {
+    private fun parseRss(
+        xml: String,
+        sourceName: String = "Yahoo Finance RSS",
+        category: String = "Wire",
+        region: String = "Global"
+    ): List<NewsHeadline> {
         val headlines = mutableListOf<NewsHeadline>()
         val factory = XmlPullParserFactory.newInstance()
         val parser = factory.newPullParser()
@@ -956,7 +1040,9 @@ class LiveMarketDataService {
         var title = ""
         var link = ""
         var pubDate = ""
+        var description = ""
         var currentTag = ""
+        val now = System.currentTimeMillis()
 
         var eventType = parser.eventType
         while (eventType != XmlPullParser.END_DOCUMENT) {
@@ -968,6 +1054,7 @@ class LiveMarketDataService {
                         title = ""
                         link = ""
                         pubDate = ""
+                        description = ""
                     }
                 }
                 XmlPullParser.TEXT -> {
@@ -976,18 +1063,30 @@ class LiveMarketDataService {
                             "title" -> title += parser.text
                             "link" -> link += parser.text
                             "pubDate" -> pubDate += parser.text
+                            "description" -> description += parser.text
                         }
                     }
                 }
                 XmlPullParser.END_TAG -> {
                     if (parser.name == "item" && insideItem) {
-                        if (title.isNotBlank()) {
+                        val cleanTitle = title.trim()
+                        if (cleanTitle.isNotBlank()) {
+                            val cleanDate = pubDate.trim()
+                            val epoch = parseDateToEpochMs(cleanDate) ?: (now - headlines.size * 1_200_000L)
+                            val cleanDesc = description.replace(Regex("<[^>]*>"), " ")
+                                .replace(Regex("\\s+"), " ")
+                                .trim()
+                                .take(240)
                             headlines.add(
                                 NewsHeadline(
-                                    title = title.trim(),
-                                    source = "Yahoo Finance RSS",
-                                    publishedAt = pubDate.trim().ifBlank { "Live Feed" },
-                                    link = link.trim()
+                                    title = cleanTitle,
+                                    source = sourceName,
+                                    publishedAt = cleanDate.ifBlank { formatRelativeTimeLabel(epoch) },
+                                    link = link.trim(),
+                                    publishedEpochMs = epoch,
+                                    summary = cleanDesc,
+                                    sourceCategory = category,
+                                    region = region
                                 )
                             )
                         }
@@ -999,6 +1098,31 @@ class LiveMarketDataService {
             eventType = parser.next()
         }
         return headlines
+    }
+
+    private fun parseDateToEpochMs(raw: String): Long? {
+        if (raw.isBlank()) return null
+        val patterns = listOf(
+            "EEE, dd MMM yyyy HH:mm:ss Z",
+            "EEE, dd MMM yyyy HH:mm:ss zzz",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd HH:mm:ss"
+        )
+        for (p in patterns) {
+            val sdf = SimpleDateFormat(p, Locale.US)
+            runCatching { sdf.parse(raw)?.time }.getOrNull()?.let { return it }
+        }
+        return null
+    }
+
+    private fun formatRelativeTimeLabel(epochMs: Long): String {
+        val diffMin = ((System.currentTimeMillis() - epochMs) / 60_000L).coerceAtLeast(0L)
+        return when {
+            diffMin < 60L -> "${diffMin}m ago"
+            diffMin < 1440L -> "${diffMin / 60L}h ago"
+            else -> "${diffMin / 1440L}d ago"
+        }
     }
 
     companion object {

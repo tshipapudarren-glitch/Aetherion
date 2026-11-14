@@ -53,6 +53,7 @@ import java.util.Locale
 @Composable
 fun ModulesDirectoryScreen(
     state: AetherDashboardState,
+    onOpenNarratives: () -> Unit = {},
     onOpenModule: (VipModuleId) -> Unit
 ) {
     var selectedLayer by remember { mutableStateOf<IntelligenceLayer?>(null) }
@@ -91,6 +92,34 @@ fun ModulesDirectoryScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = ChampagneSecondary
                 )
+            }
+        }
+
+        item {
+            val nar = state.narrativeSnapshot
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MetallicGoldContainer.copy(alpha = 0.55f),
+                border = BorderStroke(1.dp, MetallicGold.copy(alpha = 0.65f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { onOpenNarratives() }
+                    .testTag("directory_narrative_intelligence_card")
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "OMNISENSE EXPANSION · NARRATIVE & ATTENTION ENGINE →",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MetallicGoldBright,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "${nar.clusters.size} Topic Clusters · ${nar.totalSourcesCount} Sources · ${nar.totalConflictsDetected} Conflicts · Attention ${nar.globalAttentionIndex}/100",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IvoryText
+                    )
+                }
             }
         }
 

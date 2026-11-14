@@ -88,6 +88,7 @@ fun CommandCentreScreen(
     onToggleAutonomousCycle: () -> Unit,
     onToggleKillSwitch: (Boolean) -> Unit,
     onOpenConditions: () -> Unit,
+    onOpenNarratives: () -> Unit = {},
     onOpenModule: (VipModuleId) -> Unit
 ) {
     var selectedAssetFilter by remember { mutableStateOf<AssetClass?>(null) }
@@ -316,6 +317,50 @@ fun CommandCentreScreen(
                     text = "${mc.activeTradingSessions} · VIX ${mc.vixLevel?.let { String.format(Locale.US, "%.2f", it) } ?: "--"} · 10Y ${mc.us10yYield?.let { String.format(Locale.US, "%.2f%%", it) } ?: "--"} · Adv/Dec ${mc.advancersCount}/${mc.declinersCount}",
                     style = MaterialTheme.typography.bodySmall,
                     color = ChampagneSecondary
+                )
+            }
+        }
+
+        // Narrative & Attention Radar Summary Card
+        item {
+            val nar = state.narrativeSnapshot
+            val topCluster = nar.clusters.firstOrNull()
+            GlassCard(
+                borderColor = if (nar.totalConflictsDetected > 0) CrimsonAlert.copy(alpha = 0.55f) else MetallicGold.copy(alpha = 0.4f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onOpenNarratives() }
+                    .testTag("home_narrative_radar_card")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "NARRATIVE ATTENTION RADAR · ${nar.clusters.size} CLUSTERS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MetallicGoldBright,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "ATTN ${nar.globalAttentionIndex}/100 →",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (nar.totalConflictsDetected > 0) CrimsonAlert else LiveEmerald
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (topCluster != null) {
+                        "${topCluster.topicTitle} (${String.format(Locale.US, "%+d%%", topCluster.growthRatePct)} growth) · ${nar.totalConflictsDetected} conflicts · ${nar.totalArticlesAnalyzed} articles"
+                    } else {
+                        "Tap to inspect live topic clustering, news-source splits, event timelines, decay & market reaction overlays."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ChampagneSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
