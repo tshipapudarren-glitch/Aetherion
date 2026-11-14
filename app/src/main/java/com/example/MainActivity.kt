@@ -509,6 +509,9 @@ private fun AetherionAppShell(
                                 )
                                 VipModuleId.GLOBAL_CAPITAL_FLOW_RADAR -> CapitalFlowRadarScreen(
                                     state = state,
+                                    onRefreshMarkets = { viewModel.refreshMarketsAndAnalytics() },
+                                    onSelectSymbol = { viewModel.selectSymbol(it) },
+                                    onAnalyzeFlowsAi = { viewModel.analyzeCapitalFlowsWithAi() },
                                     onBack = onBack
                                 )
                                 VipModuleId.BLACK_SWAN_PREDICTOR -> BlackSwanPredictorScreen(

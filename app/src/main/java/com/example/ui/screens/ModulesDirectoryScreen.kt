@@ -175,7 +175,11 @@ fun ModulesDirectoryScreen(
                     else -> "Active AI: ${state.providerSettings.activeProvider.displayName}"
                 }
                 VipModuleId.STRATEGY_DNA_LAB -> "${state.strategies.size} DNA genomes cataloged"
-                VipModuleId.GLOBAL_CAPITAL_FLOW_RADAR -> "${state.currencyStrengths.size} FX/Gold flow indices active"
+                VipModuleId.GLOBAL_CAPITAL_FLOW_RADAR -> if (state.capitalFlowSnapshot.assetFlows.isNotEmpty()) {
+                    "Inflow: ${state.capitalFlowSnapshot.dominantInflow} · Flow ${state.capitalFlowSnapshot.netLiquidityScore}/100"
+                } else {
+                    "${state.currencyStrengths.size} FX/Gold flow indices active"
+                }
                 VipModuleId.BLACK_SWAN_PREDICTOR -> state.blackSwanAlerts.firstOrNull()?.let {
                     "Peak Tail: ${it.symbol} (${it.tailRiskScore}/100)"
                 } ?: "Awaiting candles"

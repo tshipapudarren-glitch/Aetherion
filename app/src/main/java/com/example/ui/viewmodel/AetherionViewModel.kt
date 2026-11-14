@@ -29,6 +29,7 @@ import com.example.data.remote.LiveToolBridge
 import com.example.data.remote.MultiProviderAiGateway
 import com.example.data.remote.VoiceApisClient
 import com.example.domain.engine.AetherEventBus
+import com.example.domain.engine.CapitalFlowEngine
 import com.example.domain.engine.DeterministicRiskEngine
 import com.example.domain.engine.NarrativeIntelligenceEngine
 import com.example.domain.engine.QuantitativeEngines
@@ -440,6 +441,10 @@ class AetherionViewModel(
         }
 
         val strengths = QuantitativeEngines.computeCurrencyStrength(current.quotes)
+        val capitalFlowSnap = CapitalFlowEngine.analyzeCapitalFlows(
+            quotes = current.quotes,
+            activeSessionsText = current.marketConditions.activeTradingSessions
+        )
         val allocations = QuantitativeEngines.computeRiskParityAllocation(
             current.quotes,
             current.constitution.maxTotalExposurePct
@@ -474,6 +479,7 @@ class AetherionViewModel(
                 multiverseReport = multiverse,
                 blackSwanAlerts = blackSwan,
                 currencyStrengths = strengths,
+                capitalFlowSnapshot = capitalFlowSnap,
                 allocations = allocations,
                 activeBacktest = backtest,
                 narrativeSnapshot = narrativeSnap,
@@ -502,6 +508,57 @@ class AetherionViewModel(
             "MULTIVERSE", "RISK_MATRIX", "SCENARIO_GENERATED",
             "${q.instrument.symbol} $regimeName VaR95=${String.format("%.2f%%", report.var95Pct)}, Survival=${String.format("%.1f%%", report.survivalRatePct)}"
         )
+    }
+
+    // Module 4: Global Capital Flow Radar AI Liquidity Synthesis
+    fun analyzeCapitalFlowsWithAi() {
+        val snap = _state.value.capitalFlowSnapshot
+        if (snap.assetFlows.isEmpty() && snap.regionFlows.isEmpty()) {
+            _state.update {
+                it.copy(capitalFlowAiBriefState = AiTaskState.Error("No live liquidity telemetry available yet. Refresh feeds first."))
+            }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(capitalFlowAiBriefState = AiTaskState.Loading) }
+            val assetLines = snap.assetFlows.joinToString("; ") {
+                "${it.displayName}: Flow=${it.flowScore}, Ret=${String.format(Locale.US, "%+.2f%%", it.avgChangePct)}, VolImp=${String.format(Locale.US, "%.2fx", it.volumeImpulseRatio)}"
+            }
+            val regionLines = snap.regionFlows.joinToString("; ") {
+                "${it.region}: Flow=${it.flowScore}, Ret=${String.format(Locale.US, "%+.2f%%", it.avgChangePct)}, Lead=${it.leadSymbol}"
+            }
+            val corridorLines = snap.corridors.joinToString("; ") {
+                "${it.fromLabel} -> ${it.toLabel} (${it.intensityPct}% intensity)"
+            }
+            val prompt = """
+                Real-Time Global Capital Flow Telemetry:
+                Net Liquidity Score: ${snap.netLiquidityScore}/100
+                Dominant Inflow: ${snap.dominantInflow} | Dominant Outflow: ${snap.dominantOutflow}
+                Asset Class Flows: $assetLines
+                Regional Liquidity: $regionLines
+                Active Corridors: $corridorLines
+
+                As AETHERION LIQUIDITY X, provide a concise institutional liquidity rotation briefing identifying where capital is concentrating, regional divergence, and risk-on vs safe-haven posture.
+            """.trimIndent()
+            aiGateway.queryFreeformIntelligence(
+                "You are AETHERION LIQUIDITY X, Sovereign Institutional Capital Flow Analyst.",
+                prompt,
+                _state.value.providerSettings
+            ).onSuccess { brief ->
+                _state.update { it.copy(capitalFlowAiBriefState = AiTaskState.Success(brief)) }
+                recordAudit(
+                    "CAPITAL_FLOW_RADAR",
+                    "LIQUIDITY X",
+                    "Analyzed global capital flow rotation",
+                    AuditOutcome.INFO,
+                    "Inflow: ${snap.dominantInflow} · Outflow: ${snap.dominantOutflow}"
+                )
+            }.onFailure { err ->
+                _state.update {
+                    it.copy(capitalFlowAiBriefState = AiTaskState.Error(err.localizedMessage ?: "Liquidity AI synthesis failed"))
+                }
+            }
+        }
     }
 
     // Module 2: AI Sovereign Council

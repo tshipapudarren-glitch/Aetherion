@@ -26,6 +26,7 @@ import com.example.domain.engine.AllocationSlice
 import com.example.domain.engine.BacktestReport
 import com.example.domain.engine.BlackSwanTelemetry
 import com.example.domain.engine.CurrencyStrengthItem
+import com.example.domain.engine.GlobalCapitalFlowSnapshot
 import com.example.domain.engine.MultiverseScenarioReport
 import com.example.domain.engine.NarrativeIntelligenceSnapshot
 
@@ -73,6 +74,8 @@ data class AetherDashboardState(
     val isTimeReplaying: Boolean = false,
     val blackSwanAlerts: List<BlackSwanTelemetry> = emptyList(),
     val currencyStrengths: List<CurrencyStrengthItem> = emptyList(),
+    val capitalFlowSnapshot: GlobalCapitalFlowSnapshot = GlobalCapitalFlowSnapshot(),
+    val capitalFlowAiBriefState: AiTaskState<String> = AiTaskState.Idle,
     val allocations: List<AllocationSlice> = emptyList(),
     val brokerHealth: BrokerHealthReport? = null,
     val isPingingBroker: Boolean = false,

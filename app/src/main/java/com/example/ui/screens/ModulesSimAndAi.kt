@@ -31,7 +31,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.local.LocalStrategyEntity
 import com.example.data.model.VipModuleId
-import com.example.ui.components.CapitalRadarCanvas
 import com.example.ui.components.EquityCurveCanvas
 import com.example.ui.components.GlassCard
 import com.example.ui.components.ModuleAuditLogCard
@@ -300,67 +299,6 @@ fun StrategyDnaLabScreen(
             }
         }
         item { ModuleAuditLogCard(state.auditLogs, "DNA_LAB") }
-    }
-}
-
-@Composable
-fun CapitalFlowRadarScreen(
-    state: AetherDashboardState,
-    onBack: () -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item { ModuleHeader(VipModuleId.GLOBAL_CAPITAL_FLOW_RADAR, onBack) }
-        item {
-            GlassCard {
-                Text("CURRENCY & SAFE-HAVEN STRENGTH RADAR", style = MaterialTheme.typography.titleSmall, color = MetallicGoldBright)
-                Spacer(modifier = Modifier.height(8.dp))
-                CapitalRadarCanvas(state.currencyStrengths)
-                Spacer(modifier = Modifier.height(10.dp))
-                state.currencyStrengths.forEach { item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 3.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(item.code, style = MaterialTheme.typography.labelLarge, color = IvoryText)
-                        Text(
-                            String.format(Locale.US, "%+.2f%% flow delta", item.strengthScore),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (item.strengthScore >= 0) LiveEmerald else CrimsonAlert
-                        )
-                    }
-                }
-            }
-        }
-        item {
-            GlassCard {
-                Text("REGIONAL ASSET ROTATION", style = MaterialTheme.typography.titleSmall, color = MetallicGoldBright)
-                Spacer(modifier = Modifier.height(6.dp))
-                state.quotes.filter { it.isLive }.groupBy { it.instrument.region }.forEach { (region, list) ->
-                    val avgChange = list.map { it.changePct }.average()
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("$region (${list.size} live)", style = MaterialTheme.typography.bodySmall, color = ChampagneSecondary)
-                        Text(
-                            String.format(Locale.US, "%+.2f%%", avgChange),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (avgChange >= 0) LiveEmerald else CrimsonAlert
-                        )
-                    }
-                }
-            }
-        }
-        item { ModuleAuditLogCard(state.auditLogs, "OMNISENSE") }
     }
 }
 
