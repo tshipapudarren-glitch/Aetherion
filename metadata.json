@@ -1,0 +1,6 @@
+{
+  "name": "AETHERION",
+  "description": "VIP Black Label autonomous multi-agent financial intelligence ecosystem featuring 15 command modules, deterministic risk constitution, live market APIs, Strategy Genome Lab, and MT5/broker execution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

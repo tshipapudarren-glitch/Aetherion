@@ -1,0 +1,159 @@
+{
+  "entities": {
+    "StrategyRecord": {
+      "title": "StrategyRecord",
+      "description": "Strategy DNA Birth Certificate synced to user cloud workspace",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Firebase UID" },
+        "name": { "type": "string", "description": "Strategy name" },
+        "assetClass": { "type": "string", "description": "Asset class division" },
+        "symbol": { "type": "string", "description": "Primary instrument ticker" },
+        "timeframe": { "type": "string", "description": "Chart timeframe" },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "EXPERIMENTAL",
+            "BACKTESTED",
+            "OOS_VALIDATED",
+            "STRESS_TESTED",
+            "PAPER_TRADING",
+            "LIVE_ELIGIBLE",
+            "RETIRED"
+          ]
+        },
+        "sharpeRatio": { "type": "number" },
+        "profitFactor": { "type": "number" },
+        "maxDrawdownPct": { "type": "number" },
+        "winRatePct": { "type": "number" },
+        "sampleSize": { "type": "integer" },
+        "genomeSummary": { "type": "string" },
+        "creatorAgent": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": [
+        "userId",
+        "name",
+        "assetClass",
+        "symbol",
+        "timeframe",
+        "stage",
+        "sharpeRatio",
+        "profitFactor",
+        "maxDrawdownPct",
+        "winRatePct",
+        "sampleSize",
+        "genomeSummary",
+        "creatorAgent",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MemoryRecord": {
+      "title": "MemoryRecord",
+      "description": "Collective Intelligence Memory entry across five institutional memory tiers",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "MARKET_MEMORY",
+            "STRATEGY_MEMORY",
+            "DECISION_MEMORY",
+            "EXECUTION_MEMORY",
+            "INTELLIGENCE_MEMORY"
+          ]
+        },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "symbol": { "type": "string" },
+        "agentName": { "type": "string" },
+        "confidenceScore": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "tier",
+        "title",
+        "content",
+        "symbol",
+        "agentName",
+        "confidenceScore",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AuditLogRecord": {
+      "title": "AuditLogRecord",
+      "description": "Immutable institutional audit log entry for decisions, risk vetoes, and executions",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "moduleId": { "type": "string" },
+        "actor": { "type": "string" },
+        "action": { "type": "string" },
+        "outcome": {
+          "type": "string",
+          "enum": ["APPROVED", "VETOED", "EXECUTED", "ERROR", "INFO", "SIMULATED"]
+        },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "moduleId", "actor", "action", "outcome", "details", "createdAt"]
+    },
+    "RiskConfigRecord": {
+      "title": "RiskConfigRecord",
+      "description": "Autonomous Risk Constitution thresholds",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "maxDrawdownPct": { "type": "number" },
+        "dailyLossLimitPct": { "type": "number" },
+        "maxOpenPositions": { "type": "integer" },
+        "maxTotalExposurePct": { "type": "number" },
+        "maxSpreadBps": { "type": "number" },
+        "maxSlippageBps": { "type": "number" },
+        "newsBlackoutEnabled": { "type": "boolean" },
+        "emergencyKillSwitch": { "type": "boolean" },
+        "permissionLevel": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId",
+        "maxDrawdownPct",
+        "dailyLossLimitPct",
+        "maxOpenPositions",
+        "maxTotalExposurePct",
+        "maxSpreadBps",
+        "maxSlippageBps",
+        "newsBlackoutEnabled",
+        "emergencyKillSwitch",
+        "permissionLevel",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/strategies/{strategyId}": {
+      "schema": { "$ref": "#/entities/StrategyRecord" },
+      "description": "User-owned Strategy DNA records"
+    },
+    "/users/{userId}/memories/{memoryId}": {
+      "schema": { "$ref": "#/entities/MemoryRecord" },
+      "description": "User-owned Collective Intelligence Memory entries"
+    },
+    "/users/{userId}/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLogRecord" },
+      "description": "Append-only immutable audit logs"
+    },
+    "/users/{userId}/riskConfig/{configId}": {
+      "schema": { "$ref": "#/entities/RiskConfigRecord" },
+      "description": "User-owned Risk Constitution configuration"
+    }
+  }
+}

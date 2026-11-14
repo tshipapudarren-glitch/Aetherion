@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<resources>
+    <string name="firestore_database_id" translatable="false">ai-studio-android-aetherio-cd3c4d29-92f8-47b0-a56e-ae84971f4ce3</string>
+    <string name="recaptcha_site_key" translatable="false">6LexPx8uAAAAAPe24s5ZOQmEbj5kMNC9LSRoeJCq</string>
+</resources>

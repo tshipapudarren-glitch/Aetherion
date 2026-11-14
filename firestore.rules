@@ -1,0 +1,227 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidStrategyStage(stage) {
+      return stage in [
+        'EXPERIMENTAL',
+        'BACKTESTED',
+        'OOS_VALIDATED',
+        'STRESS_TESTED',
+        'PAPER_TRADING',
+        'LIVE_ELIGIBLE',
+        'RETIRED'
+      ];
+    }
+
+    function isValidStrategy(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+             data.assetClass is string && data.assetClass.size() >= 2 && data.assetClass.size() <= 32 &&
+             data.symbol is string && data.symbol.size() >= 2 && data.symbol.size() <= 24 &&
+             data.timeframe is string && data.timeframe.size() >= 1 && data.timeframe.size() <= 12 &&
+             data.stage is string && isValidStrategyStage(data.stage) &&
+             data.sharpeRatio is number && data.sharpeRatio >= -20 && data.sharpeRatio <= 50 &&
+             data.profitFactor is number && data.profitFactor >= 0 && data.profitFactor <= 100 &&
+             data.maxDrawdownPct is number && data.maxDrawdownPct >= 0 && data.maxDrawdownPct <= 100 &&
+             data.winRatePct is number && data.winRatePct >= 0 && data.winRatePct <= 100 &&
+             data.sampleSize is int && data.sampleSize >= 0 && data.sampleSize <= 1000000 &&
+             data.genomeSummary is string && data.genomeSummary.size() >= 1 && data.genomeSummary.size() <= 500 &&
+             data.creatorAgent is string && data.creatorAgent.size() >= 2 && data.creatorAgent.size() <= 40;
+    }
+
+    function isValidMemoryTier(tier) {
+      return tier in [
+        'MARKET_MEMORY',
+        'STRATEGY_MEMORY',
+        'DECISION_MEMORY',
+        'EXECUTION_MEMORY',
+        'INTELLIGENCE_MEMORY'
+      ];
+    }
+
+    function isValidMemory(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.tier is string && isValidMemoryTier(data.tier) &&
+             data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+             data.content is string && data.content.size() >= 2 && data.content.size() <= 2000 &&
+             data.symbol is string && data.symbol.size() >= 1 && data.symbol.size() <= 24 &&
+             data.agentName is string && data.agentName.size() >= 2 && data.agentName.size() <= 40 &&
+             data.confidenceScore is number && data.confidenceScore >= 0 && data.confidenceScore <= 1;
+    }
+
+    function isValidAuditOutcome(outcome) {
+      return outcome in ['APPROVED', 'VETOED', 'EXECUTED', 'ERROR', 'INFO', 'SIMULATED'];
+    }
+
+    function isValidAuditLog(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.moduleId is string && data.moduleId.size() >= 2 && data.moduleId.size() <= 48 &&
+             data.actor is string && data.actor.size() >= 2 && data.actor.size() <= 48 &&
+             data.action is string && data.action.size() >= 2 && data.action.size() <= 120 &&
+             data.outcome is string && isValidAuditOutcome(data.outcome) &&
+             data.details is string && data.details.size() >= 1 && data.details.size() <= 1500;
+    }
+
+    function isValidRiskConfig(data, userId) {
+      return data.userId is string && data.userId == userId &&
+             data.maxDrawdownPct is number && data.maxDrawdownPct >= 0.5 && data.maxDrawdownPct <= 50 &&
+             data.dailyLossLimitPct is number && data.dailyLossLimitPct >= 0.2 && data.dailyLossLimitPct <= 20 &&
+             data.maxOpenPositions is int && data.maxOpenPositions >= 1 && data.maxOpenPositions <= 50 &&
+             data.maxTotalExposurePct is number && data.maxTotalExposurePct >= 1 && data.maxTotalExposurePct <= 100 &&
+             data.maxSpreadBps is number && data.maxSpreadBps >= 1 && data.maxSpreadBps <= 500 &&
+             data.maxSlippageBps is number && data.maxSlippageBps >= 1 && data.maxSlippageBps <= 500 &&
+             data.newsBlackoutEnabled is bool &&
+             data.emergencyKillSwitch is bool &&
+             data.permissionLevel is int && data.permissionLevel >= 1 && data.permissionLevel <= 5;
+    }
+
+    match /users/{userId}/strategies/{strategyId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(strategyId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(strategyId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'name', 'assetClass', 'symbol', 'timeframe', 'stage',
+                         'sharpeRatio', 'profitFactor', 'maxDrawdownPct', 'winRatePct',
+                         'sampleSize', 'genomeSummary', 'creatorAgent', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'name', 'assetClass', 'symbol', 'timeframe', 'stage',
+                         'sharpeRatio', 'profitFactor', 'maxDrawdownPct', 'winRatePct',
+                         'sampleSize', 'genomeSummary', 'creatorAgent', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidStrategy(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(strategyId) &&
+                       isValidStrategy(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'stage', 'sharpeRatio', 'profitFactor', 'maxDrawdownPct',
+                         'winRatePct', 'sampleSize', 'genomeSummary', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(strategyId);
+    }
+
+    match /users/{userId}/memories/{memoryId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(memoryId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(memoryId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'tier', 'title', 'content', 'symbol',
+                         'agentName', 'confidenceScore', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'tier', 'title', 'content', 'symbol',
+                         'agentName', 'confidenceScore', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidMemory(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(memoryId) &&
+                       isValidMemory(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'title', 'content', 'confidenceScore', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && request.auth.uid == userId && isValidId(memoryId);
+    }
+
+    match /users/{userId}/auditLogs/{logId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(logId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(logId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'moduleId', 'actor', 'action', 'outcome', 'details', 'createdAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'moduleId', 'actor', 'action', 'outcome', 'details', 'createdAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       isValidAuditLog(incoming(), userId);
+
+      // Immutable institutional audit log
+      allow update, delete: if false;
+    }
+
+    match /users/{userId}/riskConfig/{configId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(configId);
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(configId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'maxDrawdownPct', 'dailyLossLimitPct', 'maxOpenPositions',
+                         'maxTotalExposurePct', 'maxSpreadBps', 'maxSlippageBps',
+                         'newsBlackoutEnabled', 'emergencyKillSwitch', 'permissionLevel',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'maxDrawdownPct', 'dailyLossLimitPct', 'maxOpenPositions',
+                         'maxTotalExposurePct', 'maxSpreadBps', 'maxSlippageBps',
+                         'newsBlackoutEnabled', 'emergencyKillSwitch', 'permissionLevel',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidRiskConfig(incoming(), userId);
+
+      allow update: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(configId) &&
+                       isValidRiskConfig(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'maxDrawdownPct', 'dailyLossLimitPct', 'maxOpenPositions',
+                         'maxTotalExposurePct', 'maxSpreadBps', 'maxSlippageBps',
+                         'newsBlackoutEnabled', 'emergencyKillSwitch', 'permissionLevel', 'updatedAt'
+                       ]);
+
+      allow delete: if false;
+    }
+  }
+}
