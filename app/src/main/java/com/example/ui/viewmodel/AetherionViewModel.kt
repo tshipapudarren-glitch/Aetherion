@@ -562,47 +562,102 @@ class AetherionViewModel(
     }
 
     // Module 2: AI Sovereign Council
-    fun conveneSovereignCouncil(symbol: String = _state.value.selectedSymbol) {
+    fun selectCouncilMandate(mandate: String) {
+        _state.update { it.copy(councilFocusMandate = mandate) }
+    }
+
+    fun conveneSovereignCouncil(
+        symbol: String = _state.value.selectedSymbol,
+        mandate: String = _state.value.councilFocusMandate
+    ) {
         viewModelScope.launch {
-            _state.update { it.copy(councilState = AiTaskState.Loading) }
-            val quote = _state.value.quotes.find { it.instrument.symbol == symbol }
-            val swan = _state.value.blackSwanAlerts.find { it.symbol == symbol }
-            val contextText = if (quote != null && quote.isLive) {
-                "Price=${quote.price}, Change=${String.format("%.2f%%", quote.changePct)}, " +
-                    "AnnVol=${String.format("%.1f%%", quote.realizedVolPct)}, Source=${quote.sourceName}, " +
-                    "TailScore=${swan?.tailRiskScore ?: 0}/100 (${swan?.regimeStatus ?: "N/A"}), " +
-                    "KillSwitch=${_state.value.constitution.emergencyKillSwitch}, " +
-                    "CurrentDD=${_state.value.constitution.currentDrawdownPct}%"
+            val current = _state.value
+            _state.update {
+                it.copy(
+                    councilState = AiTaskState.Loading,
+                    councilFocusMandate = mandate,
+                    councilActivePhase = "Phase 1/3: Ingesting live telemetry & Risk Guard limits for $symbol..."
+                )
+            }
+            val quote = current.quotes.find { it.instrument.symbol == symbol }
+            val swan = current.blackSwanAlerts.find { it.symbol == symbol }
+            val constitution = current.constitution
+            val drawdownBreached = constitution.currentDrawdownPct >= constitution.maxDrawdownPct
+            val dailyLossBreached = constitution.currentDailyLossPct >= constitution.dailyLossLimitPct
+            val riskVetoActive = constitution.emergencyKillSwitch || drawdownBreached || dailyLossBreached
+
+            val flowSummary = if (current.capitalFlowSnapshot.assetFlows.isNotEmpty()) {
+                "InflowLead=${current.capitalFlowSnapshot.dominantInflow}, NetLiquidity=${current.capitalFlowSnapshot.netLiquidityScore}/100"
             } else {
-                "No live feed currently available for $symbol. Recommend HALT or NEUTRAL until market feed reconnects."
+                "CapitalFlow=Initializing"
             }
 
-            aiGateway.conveneSovereignCouncil(symbol, contextText, _state.value.providerSettings)
-                .onSuccess { vote ->
-                    _state.update { it.copy(councilState = AiTaskState.Success(vote)) }
+            val contextText = if (quote != null && quote.isLive) {
+                "Mandate=$mandate | Price=${quote.price}, Change=${String.format(Locale.US, "%.2f%%", quote.changePct)}, " +
+                    "AnnVol=${String.format(Locale.US, "%.1f%%", quote.realizedVolPct)}, Source=${quote.sourceName}, " +
+                    "TailScore=${swan?.tailRiskScore ?: 0}/100 (${swan?.regimeStatus ?: "N/A"}), $flowSummary, " +
+                    "KillSwitch=${constitution.emergencyKillSwitch}, CurrentDD=${constitution.currentDrawdownPct}%/${constitution.maxDrawdownPct}%, " +
+                    "RiskGuardStatus=${if (riskVetoActive) "DETERMINISTIC_VETO_ACTIVE" else "ARMED_CLEAR"}"
+            } else {
+                "Mandate=$mandate | No live feed currently available for $symbol. Recommend HALT or NEUTRAL until market feed reconnects."
+            }
+
+            _state.update {
+                it.copy(
+                    councilActivePhase = "Phase 2/3: ${current.providerSettings.activeProvider.displayName} deliberating (ORACLE · CRITIC · MACRO INTEL · ARBITER)..."
+                )
+            }
+
+            aiGateway.conveneSovereignCouncil(symbol, contextText, current.providerSettings)
+                .onSuccess { rawVote ->
+                    val vote = if (riskVetoActive && rawVote.consensusStance != "HALT") {
+                        rawVote.copy(
+                            consensusStance = "HALT",
+                            arbiterRuling = "[RISK GUARD DETERMINISTIC VETO] ${rawVote.arbiterRuling} (Overridden to HALT: KillSwitch=${constitution.emergencyKillSwitch}, DD=${constitution.currentDrawdownPct}%)."
+                        )
+                    } else {
+                        rawVote
+                    }
+                    _state.update {
+                        it.copy(
+                            councilState = AiTaskState.Success(vote),
+                            councilActivePhase = "Phase 3/3: Verdict committed (${vote.consensusStance} · ${vote.confidencePct}%)"
+                        )
+                    }
                     eventBus.publish(
                         "SOVEREIGN_COUNCIL", "AETHER_CORE", "COUNCIL_VOTE",
-                        "$symbol: ${vote.consensusStance} (${vote.confidencePct}%) via ${vote.providerUsed}"
+                        "$symbol [$mandate]: ${vote.consensusStance} (${vote.confidencePct}%) via ${vote.providerUsed}"
                     )
                     saveMemoryEntry(
                         tier = MemoryTier.DECISION_MEMORY,
                         title = "Council Vote · $symbol (${vote.consensusStance})",
-                        content = "ORACLE: ${vote.oracleThesis}\nCRITIC: ${vote.criticObjection}\nARBITER: ${vote.arbiterRuling}",
+                        content = "MANDATE: $mandate\nORACLE: ${vote.oracleThesis}\nCRITIC: ${vote.criticObjection}\nMACRO: ${vote.macroIntelBrief}\nARBITER: ${vote.arbiterRuling}",
                         symbol = symbol,
                         agentName = "ARBITER",
                         confidence = vote.confidencePct / 100.0
                     )
+                    val outcome = when {
+                        riskVetoActive || vote.consensusStance == "HALT" -> AuditOutcome.VETOED
+                        vote.confidencePct >= 65 && (vote.consensusStance == "BULLISH" || vote.consensusStance == "BEARISH") -> AuditOutcome.APPROVED
+                        else -> AuditOutcome.INFO
+                    }
                     recordAudit(
-                        "SOVEREIGN_COUNCIL", "ARBITER",
-                        "Council consensus ${vote.consensusStance} on $symbol",
-                        AuditOutcome.INFO,
-                        "Confidence ${vote.confidencePct}%. Strategy: ${vote.recommendedStrategy}. Provider: ${vote.providerUsed}."
+                        "SOVEREIGN_COUNCIL",
+                        if (riskVetoActive) "RISK GUARD" else "ARBITER",
+                        "Council Vote ${vote.consensusStance} on $symbol ($mandate)",
+                        outcome,
+                        "Confidence ${vote.confidencePct}% · Strategy: ${vote.recommendedStrategy} · Provider: ${vote.providerUsed}"
                     )
                 }
                 .onFailure { err ->
                     val msg = err.localizedMessage ?: "Sovereign Council call failed."
-                    _state.update { it.copy(councilState = AiTaskState.Error(msg)) }
-                    recordAudit("SOVEREIGN_COUNCIL", "ARBITER", "Council failed for $symbol", AuditOutcome.ERROR, msg)
+                    _state.update {
+                        it.copy(
+                            councilState = AiTaskState.Error(msg),
+                            councilActivePhase = "Halted — Deliberation failed"
+                        )
+                    }
+                    recordAudit("SOVEREIGN_COUNCIL", "ARBITER", "Council Vote failed for $symbol", AuditOutcome.ERROR, msg)
                 }
         }
     }

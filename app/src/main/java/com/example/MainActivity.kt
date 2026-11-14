@@ -499,6 +499,7 @@ private fun AetherionAppShell(
                                 VipModuleId.AI_SOVEREIGN_COUNCIL -> SovereignCouncilScreen(
                                     state = state,
                                     onSelectSymbol = { viewModel.selectSymbol(it) },
+                                    onSelectMandate = { viewModel.selectCouncilMandate(it) },
                                     onConveneCouncil = { viewModel.conveneSovereignCouncil(it) },
                                     onBack = onBack
                                 )

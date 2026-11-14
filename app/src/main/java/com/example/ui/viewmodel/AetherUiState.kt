@@ -69,6 +69,8 @@ data class AetherDashboardState(
     val multiverseReport: MultiverseScenarioReport? = null,
     val selectedMultiverseRegime: String = "Base Live Drift",
     val councilState: AiTaskState<CouncilVoteResult> = AiTaskState.Idle,
+    val councilFocusMandate: String = "Standard Quorum",
+    val councilActivePhase: String = "Standby — Ready to convene quorum",
     val activeBacktest: BacktestReport? = null,
     val timeReplayIndex: Int = 0,
     val isTimeReplaying: Boolean = false,
