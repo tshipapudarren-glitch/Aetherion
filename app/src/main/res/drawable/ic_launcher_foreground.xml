@@ -1,37 +1,8 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- Outer subtle metallic gold orbital ring -->
-    <path
-        android:pathData="M54,18 A36,36 0 1,1 53.99,18 Z"
-        android:strokeWidth="2.2"
-        android:strokeColor="#D4AF37"
-        android:fillColor="#00000000" />
-    <!-- Crimson telemetry arc -->
-    <path
-        android:pathData="M24,54 A30,30 0 0,1 54,24"
-        android:strokeWidth="2.8"
-        android:strokeLineCap="round"
-        android:strokeColor="#DC2626"
-        android:fillColor="#00000000" />
-    <path
-        android:pathData="M84,54 A30,30 0 0,1 54,84"
-        android:strokeWidth="2.8"
-        android:strokeLineCap="round"
-        android:strokeColor="#DC2626"
-        android:fillColor="#00000000" />
-    <!-- Central obsidian & gold sovereign Aetherion delta crest -->
-    <path
-        android:pathData="M54,28 L76,72 L64,72 L54,51 L44,72 L32,72 Z"
-        android:fillColor="#D4AF37" />
-    <!-- Inner crimson apex core -->
-    <path
-        android:pathData="M54,56 L61,72 L47,72 Z"
-        android:fillColor="#DC2626" />
-    <!-- Precision crosshair diamond -->
-    <path
-        android:pathData="M54,41 L58,45 L54,49 L50,45 Z"
-        android:fillColor="#F5E6B3" />
-</vector>
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="66dp"
+        android:height="66dp"
+        android:drawable="@drawable/aetherion_logo_crest_1794720948641"
+        android:gravity="center" />
+</layer-list>

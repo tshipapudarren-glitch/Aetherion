@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -144,27 +145,46 @@ fun AetherionAuthScreen(
                                 )
                             )
                     )
-                    Column(
+                    Row(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(18.dp)
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Text(
-                            text = "VIP BLACK LABEL EDITION",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MetallicGoldBright
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "AETHERION",
-                            style = MaterialTheme.typography.displaySmall,
-                            color = IvoryText
-                        )
-                        Text(
-                            text = "Autonomous Financial Intelligence Ecosystem",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = ChampagneSecondary
-                        )
+                        Surface(
+                            shape = CircleShape,
+                            border = BorderStroke(1.5.dp, MetallicGold),
+                            color = ObsidianVoid,
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.aetherion_logo_crest_1794720948641),
+                                contentDescription = "AETHERION Brand Emblem",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "VIP BLACK LABEL EDITION",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MetallicGoldBright
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "AETHERION",
+                                style = MaterialTheme.typography.displaySmall,
+                                color = IvoryText
+                            )
+                            Text(
+                                text = "Autonomous Financial Intelligence Ecosystem",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = ChampagneSecondary
+                            )
+                        }
                     }
                 }
             }
