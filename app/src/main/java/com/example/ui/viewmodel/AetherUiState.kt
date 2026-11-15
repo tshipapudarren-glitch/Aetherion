@@ -16,6 +16,7 @@ import com.example.data.model.ProviderDiagnostic
 import com.example.data.model.ProviderSettings
 import com.example.data.model.RiskCheckResult
 import com.example.data.remote.BrokerHealthReport
+import com.example.data.remote.ChartVisionAnalysis
 import com.example.data.remote.CouncilVoteResult
 import com.example.data.remote.ElevenLabsVoiceProfile
 import com.example.data.remote.EventImpactAnalysis
@@ -26,9 +27,13 @@ import com.example.domain.engine.AllocationSlice
 import com.example.domain.engine.BacktestReport
 import com.example.domain.engine.BlackSwanTelemetry
 import com.example.domain.engine.CurrencyStrengthItem
+import com.example.domain.engine.EventImpactIntelligenceSnapshot
 import com.example.domain.engine.GlobalCapitalFlowSnapshot
+import com.example.domain.engine.MarketStructureSnapshot
 import com.example.domain.engine.MultiverseScenarioReport
 import com.example.domain.engine.NarrativeIntelligenceSnapshot
+import com.example.domain.engine.QuantCodeTarget
+import com.example.domain.engine.TradeSetupPlan
 
 sealed interface AiTaskState<out T> {
     data object Idle : AiTaskState<Nothing>
@@ -85,6 +90,17 @@ data class AetherDashboardState(
     val headlines: List<NewsHeadline> = emptyList(),
     val headlineError: String? = null,
     val eventImpactState: AiTaskState<EventImpactAnalysis> = AiTaskState.Idle,
+    val eventIntelligenceSnapshot: EventImpactIntelligenceSnapshot = EventImpactIntelligenceSnapshot(),
+    val activeSetupPlan: TradeSetupPlan? = null,
+    val setupDirectionOverride: String? = null,
+    val selectedChartTimeframe: String = "1H",
+    val setupAiRefineState: AiTaskState<String> = AiTaskState.Idle,
+    val marketStructureSnapshot: MarketStructureSnapshot = MarketStructureSnapshot(),
+    val chartVisionState: AiTaskState<ChartVisionAnalysis> = AiTaskState.Idle,
+    val selectedQuantTarget: QuantCodeTarget = QuantCodeTarget.PINE_V6,
+    val generatedQuantCode: String = "",
+    val quantStaticAuditFindings: List<String> = emptyList(),
+    val quantAiAuditState: AiTaskState<String> = AiTaskState.Idle,
     val narrativeSnapshot: NarrativeIntelligenceSnapshot = NarrativeIntelligenceSnapshot(),
     val selectedNarrativeId: String? = null,
     val isRefreshingNarratives: Boolean = false,

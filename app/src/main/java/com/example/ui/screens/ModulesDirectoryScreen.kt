@@ -54,6 +54,7 @@ import java.util.Locale
 fun ModulesDirectoryScreen(
     state: AetherDashboardState,
     onOpenNarratives: () -> Unit = {},
+    onOpenTradingTerminal: () -> Unit = {},
     onOpenModule: (VipModuleId) -> Unit
 ) {
     var selectedLayer by remember { mutableStateOf<IntelligenceLayer?>(null) }
@@ -116,6 +117,38 @@ fun ModulesDirectoryScreen(
                     )
                     Text(
                         text = "${nar.clusters.size} Topic Clusters · ${nar.totalSourcesCount} Sources · ${nar.totalConflictsDetected} Conflicts · Attention ${nar.globalAttentionIndex}/100",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IvoryText
+                    )
+                }
+            }
+        }
+
+        item {
+            val setup = state.activeSetupPlan
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = ObsidianElevated,
+                border = BorderStroke(1.dp, IceTelemetry.copy(alpha = 0.55f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { onOpenTradingTerminal() }
+                    .testTag("directory_trading_terminal_card")
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "TRADINGVIEW TERMINAL & SETUP ARCHITECT →",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IceTelemetry,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (setup != null) {
+                            "${setup.symbol} ${setup.direction} · Auto-Drawn Entry / SL / TP1 / TP2 / TP3 (1:${String.format(Locale.US, "%.1f", setup.riskRewardTp3)}R)"
+                        } else {
+                            "TradingView charts, 2×2 Multi-Chart workspace & auto-drawn Entry/SL/TP1–TP3 setups."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = IvoryText
                     )
@@ -193,7 +226,10 @@ fun ModulesDirectoryScreen(
                 VipModuleId.AUTONOMOUS_RISK_DEFENCE_MATRIX -> if (state.constitution.emergencyKillSwitch)
                     "EMERGENCY KILL SWITCH ENGAGED"
                 else "MaxDD ${state.constitution.maxDrawdownPct}% · Permission L${state.constitution.permissionLevel}"
-                VipModuleId.GLOBAL_EVENT_IMPACT_ENGINE -> "${state.headlines.size} live headlines queued"
+                VipModuleId.GLOBAL_EVENT_IMPACT_ENGINE -> {
+                    val ei = state.eventIntelligenceSnapshot
+                    "${ei.centralBankCount} CB · ${ei.economicNewsCount} Econ · ${ei.geopoliticalCount} Geo · ${ei.positioningRows.size} Pos"
+                }
                 VipModuleId.AUTONOMOUS_STRATEGY_FACTORY -> state.factoryStatusMessage
                 VipModuleId.AETHERION_OVERMIND -> "Cycle ${if (state.autonomousCycle.isRunning) "RUNNING" else "STANDBY"} · ${state.agents.size} Agents"
             }

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,18 +21,26 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.data.local.LocalStrategyEntity
 import com.example.data.model.VipModuleId
+import com.example.domain.engine.QuantCodeTarget
 import com.example.ui.components.EquityCurveCanvas
 import com.example.ui.components.GlassCard
 import com.example.ui.components.ModuleAuditLogCard
@@ -40,10 +50,12 @@ import com.example.ui.components.TelemetryStatTile
 import com.example.ui.theme.ChampagneSecondary
 import com.example.ui.theme.CrimsonAlert
 import com.example.ui.theme.CrimsonContainer
+import com.example.ui.theme.IceTelemetry
 import com.example.ui.theme.IvoryText
 import com.example.ui.theme.LiveEmerald
 import com.example.ui.theme.MetallicGold
 import com.example.ui.theme.MetallicGoldBright
+import com.example.ui.theme.MetallicGoldContainer
 import com.example.ui.theme.ObsidianBorder
 import com.example.ui.theme.ObsidianVoid
 import com.example.ui.theme.SimulatedAmber
@@ -128,8 +140,15 @@ fun MultiverseSimulatorScreen(
 fun StrategyDnaLabScreen(
     state: AetherDashboardState,
     onMutateStrategy: (LocalStrategyEntity) -> Unit,
+    onSelectQuantTarget: (QuantCodeTarget, LocalStrategyEntity?) -> Unit = { _, _ -> },
+    onAuditQuantCode: (LocalStrategyEntity?) -> Unit = {},
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    @Suppress("DEPRECATION")
+    val clipboard = LocalClipboardManager.current
+    val activeStrategy = state.strategies.firstOrNull { it.symbol == state.selectedSymbol } ?: state.strategies.firstOrNull()
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -161,6 +180,113 @@ fun StrategyDnaLabScreen(
             }
         }
 
+        // Pine Script v6 & MetaTrader 5 MQL5 Builder + Code Auditor
+        item {
+            GlassCard(borderColor = IceTelemetry.copy(alpha = 0.55f)) {
+                Text("QUANT CODE LAB · PINE SCRIPT v6 & MQL5 BUILDER", style = MaterialTheme.typography.titleSmall, color = MetallicGoldBright, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Compiles non-repainting strategy templates (${activeStrategy?.name ?: state.selectedSymbol}) with mandatory Risk Guard SL & spread checks.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ChampagneSecondary
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    QuantCodeTarget.entries.forEach { target ->
+                        FilterChip(
+                            selected = state.selectedQuantTarget == target,
+                            onClick = { onSelectQuantTarget(target, activeStrategy) },
+                            label = { Text(target.label, style = MaterialTheme.typography.labelSmall) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MetallicGoldContainer,
+                                selectedLabelColor = MetallicGoldBright
+                            ),
+                            modifier = Modifier.testTag("quant_target_${target.id.lowercase(Locale.US)}")
+                        )
+                    }
+                }
+
+                if (state.generatedQuantCode.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = ObsidianVoid,
+                        border = BorderStroke(1.dp, ObsidianBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = state.generatedQuantCode,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                            color = IceTelemetry,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    state.quantStaticAuditFindings.forEach { line ->
+                        Text(
+                            text = "• $line",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (line.startsWith("PASS")) LiveEmerald else CrimsonAlert
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { clipboard.setText(AnnotatedString(state.generatedQuantCode)) },
+                            border = BorderStroke(1.dp, ObsidianBorder),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Text("Copy Code", style = MaterialTheme.typography.labelSmall, color = IvoryText)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "AETHERION ${state.selectedQuantTarget.label} (${activeStrategy?.symbol ?: state.selectedSymbol})")
+                                    putExtra(Intent.EXTRA_TEXT, state.generatedQuantCode)
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Export Quant Script"))
+                            },
+                            border = BorderStroke(1.dp, MetallicGold),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Text("Export ${state.selectedQuantTarget.fileExtension}", style = MaterialTheme.typography.labelSmall, color = MetallicGoldBright)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { onAuditQuantCode(activeStrategy) },
+                        enabled = state.quantAiAuditState !is AiTaskState.Loading,
+                        colors = ButtonDefaults.buttonColors(containerColor = MetallicGold, contentColor = ObsidianVoid),
+                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("ai_audit_quant_button")
+                    ) {
+                        if (state.quantAiAuditState is AiTaskState.Loading) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = ObsidianVoid, strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("AI Code Auditor Scanning...")
+                        } else {
+                            Text("Run AI Code Safety & Repaint Audit", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    when (val res = state.quantAiAuditState) {
+                        is AiTaskState.Success -> {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(shape = RoundedCornerShape(10.dp), color = ObsidianVoid, border = BorderStroke(1.dp, LiveEmerald.copy(alpha = 0.5f))) {
+                                Text(res.data, style = MaterialTheme.typography.bodySmall, color = ChampagneSecondary, modifier = Modifier.padding(10.dp))
+                            }
+                        }
+                        is AiTaskState.Error -> {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text("CODE AUDIT ERROR: ${res.message}", style = MaterialTheme.typography.labelSmall, color = CrimsonAlert)
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
+
         state.strategies.forEach { strat ->
             item(key = strat.id) {
                 GlassCard {
@@ -180,7 +306,7 @@ fun StrategyDnaLabScreen(
                         Button(
                             onClick = { onMutateStrategy(strat) },
                             colors = ButtonDefaults.buttonColors(containerColor = MetallicGold, contentColor = ObsidianVoid),
-                            modifier = Modifier.height(40.dp)
+                            modifier = Modifier.height(48.dp)
                         ) {
                             Text("Mutate DNA", style = MaterialTheme.typography.labelMedium)
                         }

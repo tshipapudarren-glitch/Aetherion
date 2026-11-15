@@ -1,6 +1,9 @@
 package com.example.ui.viewmodel
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -31,9 +34,14 @@ import com.example.data.remote.VoiceApisClient
 import com.example.domain.engine.AetherEventBus
 import com.example.domain.engine.CapitalFlowEngine
 import com.example.domain.engine.DeterministicRiskEngine
+import com.example.domain.engine.EventImpactEngine
+import com.example.domain.engine.MarketStructureEngine
 import com.example.domain.engine.NarrativeIntelligenceEngine
+import com.example.domain.engine.QuantCodeTarget
 import com.example.domain.engine.QuantitativeEngines
+import com.example.domain.engine.SetupArchitectEngine
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +52,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.util.Locale
@@ -198,6 +207,7 @@ class AetherionViewModel(
                         paperOrders = orders
                     )
                 }
+                recomputeDerivedAnalytics()
             }
         }
 
@@ -294,6 +304,7 @@ class AetherionViewModel(
                     settings = _state.value.providerSettings
                 )
                 _state.update { it.copy(isRefreshingConditions = false, marketConditions = conditions) }
+                recomputeDerivedAnalytics()
                 eventBus.publish(
                     "MACRO_INTEL", "RISK_MATRIX", "CONDITIONS_UPDATED",
                     "${conditions.overallRegime} · Risk Appetite ${conditions.riskAppetiteScore}/100"
@@ -393,6 +404,7 @@ class AetherionViewModel(
                             isRefreshingNarratives = false
                         )
                     }
+                    recomputeDerivedAnalytics()
                     eventBus.publish(
                         "OMNISENSE", "EVENT_ENGINE", "NARRATIVES_CLUSTERED",
                         "${snapshot.clusters.size} narratives · ${snapshot.totalConflictsDetected} conflicts · Top: ${snapshot.fastestGrowingNarrative}",
@@ -474,6 +486,34 @@ class AetherionViewModel(
             ?.takeIf { id -> narrativeSnap.clusters.any { it.id == id } }
             ?: narrativeSnap.clusters.firstOrNull()?.id
 
+        val eventAi = (current.eventImpactState as? AiTaskState.Success)?.data
+        val eventIntel = EventImpactEngine.buildSnapshot(
+            headlines = current.headlines,
+            conditions = current.marketConditions,
+            quotes = current.quotes,
+            paperOrders = current.paperOrders
+        )
+        val setupPlan = selectedQuote?.let { q ->
+            SetupArchitectEngine.architectSetup(
+                quote = q,
+                conditions = current.marketConditions,
+                eventAnalysis = eventAi,
+                paperOrders = current.paperOrders,
+                constitution = current.constitution,
+                forcedDirection = current.setupDirectionOverride,
+                timeframeLabel = current.selectedChartTimeframe
+            )
+        }
+        val marketStructure = MarketStructureEngine.analyze(
+            quote = selectedQuote,
+            allQuotes = current.quotes,
+            paperOrders = current.paperOrders
+        )
+        val quantCode = current.generatedQuantCode.ifBlank {
+            strategyForSymbol?.let { MarketStructureEngine.generateQuantTemplate(it, current.selectedQuantTarget) }.orEmpty()
+        }
+        val quantAudit = if (quantCode.isNotBlank()) MarketStructureEngine.auditQuantSource(quantCode) else current.quantStaticAuditFindings
+
         _state.update {
             it.copy(
                 multiverseReport = multiverse,
@@ -483,8 +523,339 @@ class AetherionViewModel(
                 allocations = allocations,
                 activeBacktest = backtest,
                 narrativeSnapshot = narrativeSnap,
-                selectedNarrativeId = activeNarrativeId
+                selectedNarrativeId = activeNarrativeId,
+                eventIntelligenceSnapshot = eventIntel,
+                activeSetupPlan = setupPlan,
+                marketStructureSnapshot = marketStructure,
+                generatedQuantCode = quantCode,
+                quantStaticAuditFindings = quantAudit
             )
+        }
+    }
+
+    fun setSetupDirectionBias(direction: String?) {
+        _state.update { it.copy(setupDirectionOverride = direction, setupAiRefineState = AiTaskState.Idle) }
+        recomputeDerivedAnalytics()
+    }
+
+    fun setChartTimeframe(timeframe: String) {
+        _state.update { it.copy(selectedChartTimeframe = timeframe) }
+        recomputeDerivedAnalytics()
+    }
+
+    fun refineActiveSetupWithAi() {
+        val current = _state.value
+        val base = current.activeSetupPlan ?: return
+        val quote = current.quotes.find { it.instrument.symbol == base.symbol } ?: return
+
+        viewModelScope.launch {
+            _state.update { it.copy(setupAiRefineState = AiTaskState.Loading) }
+            val eventSummary = (current.eventImpactState as? AiTaskState.Success)?.data?.let {
+                "Event=${it.headline}, Severity=${it.severityScore}/100, Bias=${it.directionalBias}"
+            } ?: current.eventIntelligenceSnapshot.positioningRiskSummary
+            val context = """
+                Instrument: ${base.symbol} Spot=${quote.price}, 24hChg=${String.format(Locale.US, "%+.2f%%", quote.changePct)}, AnnVol=${String.format(Locale.US, "%.1f%%", quote.realizedVolPct)}
+                Quant Baseline: Direction=${base.direction}, Entry=${base.entryPrice}, SL=${base.stopLoss}, TP1=${base.tp1}, TP2=${base.tp2}, TP3=${base.tp3}, ATR14=${base.atr14}, MA50=${base.ma50}, RSI14=${base.rsi14}
+                Positioning: ${base.positioningLabel}
+                Macro & Event Impact: $eventSummary | Regime=${current.marketConditions.overallRegime}
+            """.trimIndent()
+
+            aiGateway.refineTradeSetup(base.symbol, context, current.providerSettings)
+                .onSuccess { proposal ->
+                    val updated = SetupArchitectEngine.applyAiRefinement(
+                        base = base,
+                        direction = proposal.direction,
+                        entryPrice = proposal.entryPrice,
+                        stopLoss = proposal.stopLoss,
+                        tp1 = proposal.tp1,
+                        tp2 = proposal.tp2,
+                        tp3 = proposal.tp3,
+                        confidencePct = proposal.confidencePct,
+                        structuralThesis = proposal.structuralThesis,
+                        eventAlignmentNote = proposal.eventAlignmentNote,
+                        providerUsed = proposal.providerUsed
+                    )
+                    _state.update {
+                        it.copy(
+                            activeSetupPlan = updated,
+                            setupAiRefineState = AiTaskState.Success("Refined ${updated.symbol} ${updated.direction} via ${proposal.providerUsed}")
+                        )
+                    }
+                    recordAudit(
+                        "SETUP_ARCHITECT", "LIQUIDITY X",
+                        "AI refined ${updated.direction} setup on ${updated.symbol}",
+                        AuditOutcome.INFO,
+                        "Entry=${SetupArchitectEngine.formatPrice(updated.entryPrice)}, SL=${SetupArchitectEngine.formatPrice(updated.stopLoss)}, TP1=${SetupArchitectEngine.formatPrice(updated.tp1)}, TP3=${SetupArchitectEngine.formatPrice(updated.tp3)}"
+                    )
+                }
+                .onFailure { err ->
+                    _state.update {
+                        it.copy(setupAiRefineState = AiTaskState.Error(err.localizedMessage ?: "Setup Architect AI failed"))
+                    }
+                }
+        }
+    }
+
+    fun executeActiveSetupOrder(routeToMt5Bridge: Boolean) {
+        val current = _state.value
+        val plan = current.activeSetupPlan ?: return
+        viewModelScope.launch {
+            val openOrders = current.paperOrders.filter { it.status == "OPEN" }
+            val currentExposure = openOrders.sumOf { it.exposurePct }
+            val isHighRiskNews = current.blackSwanAlerts.any { it.symbol == plan.symbol && it.tailRiskScore >= 75 } ||
+                ((current.eventImpactState as? AiTaskState.Success)?.data?.severityScore ?: 0) >= 80
+            val side = if (plan.direction == "SHORT") "SELL" else "BUY"
+
+            val check = riskEngine.evaluateExecutionProposal(
+                constitution = current.constitution,
+                strategyStage = StrategyStage.PAPER_TRADING,
+                proposedExposurePct = 2.0,
+                currentExposurePct = currentExposure,
+                openPositionsCount = openOrders.size,
+                estimatedSpreadBps = 6.0,
+                estimatedSlippageBps = 4.0,
+                isHighImpactNewsWindow = isHighRiskNews,
+                isLiveBrokerRoute = routeToMt5Bridge
+            )
+            _state.update { it.copy(lastRiskEvaluation = check) }
+
+            if (!check.approved) {
+                recordAudit("RISK_MATRIX", "RISK GUARD", "VETOED Setup Architect $side ${plan.symbol}", AuditOutcome.VETOED, check.violatedRules.joinToString(" | "))
+                _state.update { it.copy(statusBanner = check.reason) }
+                return@launch
+            }
+
+            if (routeToMt5Bridge) {
+                val res = brokerClient.submitOrderToMt5Bridge(
+                    baseUrl = current.providerSettings.mt5BridgeUrl,
+                    authToken = current.providerSettings.mt5BridgeToken,
+                    symbol = plan.symbol,
+                    side = side,
+                    volumeLots = 0.2,
+                    stopLoss = plan.stopLoss,
+                    takeProfit = plan.tp2
+                )
+                res.onSuccess { msg ->
+                    recordAudit("SETUP_ARCHITECT", "EXECUTOR", "MT5 Setup Executed: $side ${plan.symbol}", AuditOutcome.EXECUTED, msg)
+                    _state.update { it.copy(statusBanner = msg) }
+                }.onFailure { err ->
+                    val errMsg = err.localizedMessage ?: "MT5 Bridge submission failed"
+                    recordAudit("SETUP_ARCHITECT", "EXECUTOR", "MT5 Setup Failed", AuditOutcome.ERROR, errMsg)
+                    _state.update { it.copy(statusBanner = "MT5 ERROR: $errMsg") }
+                }
+            } else {
+                val paper = PaperOrderEntity(
+                    id = "setup_${UUID.randomUUID().toString().take(8)}",
+                    strategyId = "setup_architect",
+                    strategyName = "Setup Architect (${plan.providerLabel.take(22)})",
+                    symbol = plan.symbol,
+                    side = side,
+                    entryPrice = plan.entryPrice,
+                    stopLoss = plan.stopLoss,
+                    takeProfit = plan.tp2,
+                    exposurePct = 2.0,
+                    status = "OPEN",
+                    pnlPct = 0.0
+                )
+                localDb.paperOrderDao().upsert(paper)
+                recordAudit(
+                    "SETUP_ARCHITECT", "EXECUTOR",
+                    "Paper Setup Placed: $side ${plan.symbol} @ ${SetupArchitectEngine.formatPrice(plan.entryPrice)}",
+                    AuditOutcome.SIMULATED,
+                    "SL=${SetupArchitectEngine.formatPrice(plan.stopLoss)} | TP1=${SetupArchitectEngine.formatPrice(plan.tp1)} | TP2=${SetupArchitectEngine.formatPrice(plan.tp2)} | TP3=${SetupArchitectEngine.formatPrice(plan.tp3)}"
+                )
+                _state.update { it.copy(statusBanner = "SETUP ARCHITECT EXECUTED: $side ${plan.symbol} @ ${SetupArchitectEngine.formatPrice(plan.entryPrice)}") }
+            }
+        }
+    }
+
+    fun executeTerminalTicketOrder(
+        side: String,
+        exposurePct: Double,
+        customSl: Double?,
+        customTp: Double?,
+        routeToMt5Bridge: Boolean
+    ) {
+        val current = _state.value
+        val quote = current.quotes.find { it.instrument.symbol == current.selectedSymbol }
+            ?: current.quotes.firstOrNull { it.isLive }
+        if (quote == null || !quote.isLive) {
+            _state.update { it.copy(statusBanner = "Live market feed required to execute terminal order.") }
+            return
+        }
+        val cleanSide = if (side.uppercase() == "SELL") "SELL" else "BUY"
+        val atr = current.marketStructureSnapshot.atrValue.takeIf { it > 0.0 } ?: (quote.price * 0.01)
+        val sl = customSl?.takeIf { it > 0.0 } ?: if (cleanSide == "BUY") quote.price - atr * 1.4 else quote.price + atr * 1.4
+        val tp = customTp?.takeIf { it > 0.0 } ?: if (cleanSide == "BUY") quote.price + atr * 2.8 else quote.price - atr * 2.8
+
+        viewModelScope.launch {
+            val openOrders = current.paperOrders.filter { it.status == "OPEN" }
+            val currentExposure = openOrders.sumOf { it.exposurePct }
+            val spreadBps = current.marketStructureSnapshot.estimatedSpreadBps
+            val isHighRiskNews = current.blackSwanAlerts.any { it.symbol == quote.instrument.symbol && it.tailRiskScore >= 75 } ||
+                ((current.eventImpactState as? AiTaskState.Success)?.data?.severityScore ?: 0) >= 80
+
+            val check = riskEngine.evaluateExecutionProposal(
+                constitution = current.constitution,
+                strategyStage = StrategyStage.PAPER_TRADING,
+                proposedExposurePct = exposurePct.coerceIn(0.25, 10.0),
+                currentExposurePct = currentExposure,
+                openPositionsCount = openOrders.size,
+                estimatedSpreadBps = spreadBps,
+                estimatedSlippageBps = 3.5,
+                isHighImpactNewsWindow = isHighRiskNews,
+                isLiveBrokerRoute = routeToMt5Bridge
+            )
+            _state.update { it.copy(lastRiskEvaluation = check) }
+
+            if (!check.approved) {
+                recordAudit("RISK_MATRIX", "RISK GUARD", "VETOED Terminal $cleanSide ${quote.instrument.symbol}", AuditOutcome.VETOED, check.violatedRules.joinToString(" | "))
+                _state.update { it.copy(statusBanner = check.reason) }
+                return@launch
+            }
+
+            if (routeToMt5Bridge) {
+                val res = brokerClient.submitOrderToMt5Bridge(
+                    baseUrl = current.providerSettings.mt5BridgeUrl,
+                    authToken = current.providerSettings.mt5BridgeToken,
+                    symbol = quote.instrument.symbol,
+                    side = cleanSide,
+                    volumeLots = (exposurePct / 10.0).coerceIn(0.01, 2.0),
+                    stopLoss = sl,
+                    takeProfit = tp
+                )
+                res.onSuccess { msg ->
+                    recordAudit("TERMINAL_EXEC", "EXECUTOR", "MT5 Terminal Order: $cleanSide ${quote.instrument.symbol}", AuditOutcome.EXECUTED, msg)
+                    _state.update { it.copy(statusBanner = msg) }
+                }.onFailure { err ->
+                    val errMsg = err.localizedMessage ?: "MT5 Bridge submission failed"
+                    recordAudit("TERMINAL_EXEC", "EXECUTOR", "MT5 Terminal Error", AuditOutcome.ERROR, errMsg)
+                    _state.update { it.copy(statusBanner = "MT5 ERROR: $errMsg") }
+                }
+            } else {
+                val order = PaperOrderEntity(
+                    id = "term_${UUID.randomUUID().toString().take(8)}",
+                    strategyId = "terminal_ticket",
+                    strategyName = "Macro Terminal Ticket",
+                    symbol = quote.instrument.symbol,
+                    side = cleanSide,
+                    entryPrice = quote.price,
+                    stopLoss = sl,
+                    takeProfit = tp,
+                    exposurePct = exposurePct.coerceIn(0.25, 10.0),
+                    status = "OPEN",
+                    pnlPct = 0.0
+                )
+                localDb.paperOrderDao().upsert(order)
+                recordAudit(
+                    "TERMINAL_EXEC", "EXECUTOR",
+                    "Paper Terminal $cleanSide ${quote.instrument.symbol} (${String.format(Locale.US, "%.1f%%", order.exposurePct)})",
+                    AuditOutcome.SIMULATED,
+                    "Entry=${SetupArchitectEngine.formatPrice(quote.price)} | SL=${SetupArchitectEngine.formatPrice(sl)} | TP=${SetupArchitectEngine.formatPrice(tp)}"
+                )
+                _state.update { it.copy(statusBanner = "ORDER PLACED: $cleanSide ${quote.instrument.symbol} @ ${SetupArchitectEngine.formatPrice(quote.price)}") }
+            }
+        }
+    }
+
+    fun analyzeUploadedChartScreenshot(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _state.update { it.copy(chartVisionState = AiTaskState.Loading) }
+            val current = _state.value
+            val bitmap = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val decoded = BitmapFactory.decodeStream(stream) ?: return@use null
+                        val maxDim = 1280
+                        if (decoded.width > maxDim || decoded.height > maxDim) {
+                            val ratio = minOf(maxDim.toFloat() / decoded.width, maxDim.toFloat() / decoded.height)
+                            Bitmap.createScaledBitmap(
+                                decoded,
+                                (decoded.width * ratio).toInt().coerceAtLeast(1),
+                                (decoded.height * ratio).toInt().coerceAtLeast(1),
+                                true
+                            )
+                        } else decoded
+                    }
+                }.getOrNull()
+            }
+            if (bitmap == null) {
+                _state.update { it.copy(chartVisionState = AiTaskState.Error("Unable to decode selected chart image.")) }
+                return@launch
+            }
+            val quote = current.quotes.find { it.instrument.symbol == current.selectedSymbol }
+            val contextText = buildString {
+                if (quote != null && quote.isLive) {
+                    append("Live Feed: ${quote.instrument.symbol}=${quote.price}, Chg=${quote.changePct}%, Vol=${quote.realizedVolPct}%. ")
+                }
+                append("Structure: ${current.marketStructureSnapshot.structureBias}. ")
+                append("Regime: ${current.marketConditions.overallRegime}.")
+            }
+
+            aiGateway.analyzeChartScreenshot(
+                bitmap = bitmap,
+                symbol = current.selectedSymbol,
+                timeframe = current.selectedChartTimeframe,
+                marketContext = contextText,
+                settings = current.providerSettings
+            ).onSuccess { result ->
+                _state.update { it.copy(chartVisionState = AiTaskState.Success(result)) }
+                recordAudit(
+                    "SETUP_ARCHITECT", "CHART VISION",
+                    "Analyzed chart screenshot (${result.detectedPattern})",
+                    AuditOutcome.INFO,
+                    "Bias=${result.bias} (${result.confidencePct}%) · Entry=${result.entryZone} · SL=${result.stopLossLevel}"
+                )
+            }.onFailure { err ->
+                _state.update { it.copy(chartVisionState = AiTaskState.Error(err.localizedMessage ?: "Chart Vision failed")) }
+            }
+        }
+    }
+
+    fun selectQuantCodeTarget(target: QuantCodeTarget, strategy: LocalStrategyEntity? = null) {
+        val current = _state.value
+        val activeStrat = strategy
+            ?: current.strategies.firstOrNull { it.symbol == current.selectedSymbol }
+            ?: current.strategies.firstOrNull()
+        val code = activeStrat?.let { MarketStructureEngine.generateQuantTemplate(it, target) }.orEmpty()
+        val findings = if (code.isNotBlank()) MarketStructureEngine.auditQuantSource(code) else emptyList()
+        _state.update {
+            it.copy(
+                selectedQuantTarget = target,
+                generatedQuantCode = code,
+                quantStaticAuditFindings = findings,
+                quantAiAuditState = AiTaskState.Idle
+            )
+        }
+    }
+
+    fun auditQuantCodeWithAi(strategy: LocalStrategyEntity? = null) {
+        val current = _state.value
+        val strat = strategy
+            ?: current.strategies.firstOrNull { it.symbol == current.selectedSymbol }
+            ?: current.strategies.firstOrNull()
+            ?: return
+        val code = current.generatedQuantCode.ifBlank {
+            MarketStructureEngine.generateQuantTemplate(strat, current.selectedQuantTarget)
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(quantAiAuditState = AiTaskState.Loading) }
+            aiGateway.auditAndEnhanceQuantCode(
+                strategyName = strat.name,
+                targetLabel = current.selectedQuantTarget.label,
+                sourceCode = code,
+                settings = current.providerSettings
+            ).onSuccess { audit ->
+                _state.update { it.copy(quantAiAuditState = AiTaskState.Success(audit)) }
+                recordAudit(
+                    "DNA_LAB", "CODE AUDITOR",
+                    "AI audited ${current.selectedQuantTarget.label} script for ${strat.name}",
+                    AuditOutcome.INFO,
+                    audit.take(180)
+                )
+            }.onFailure { err ->
+                _state.update { it.copy(quantAiAuditState = AiTaskState.Error(err.localizedMessage ?: "Code audit failed")) }
+            }
         }
     }
 

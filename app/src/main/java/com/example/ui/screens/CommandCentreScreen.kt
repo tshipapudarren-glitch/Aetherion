@@ -37,6 +37,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,10 +59,11 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.model.AssetClass
 import com.example.data.model.VipModuleId
-import com.example.ui.components.CandleChartCanvas
 import com.example.ui.components.EnvironmentBadge
 import com.example.ui.components.GlassCard
+import com.example.ui.components.InstitutionalAccountAndSentimentHud
 import com.example.ui.components.TelemetryStatTile
+import com.example.ui.components.TradingViewTerminalCard
 import com.example.ui.theme.ChampagneSecondary
 import com.example.ui.theme.CrimsonAlert
 import com.example.ui.theme.CrimsonContainer
@@ -85,10 +87,12 @@ fun CommandCentreScreen(
     state: AetherDashboardState,
     onRefreshMarkets: () -> Unit,
     onSelectSymbol: (String) -> Unit,
+    onSelectTimeframe: (String) -> Unit = {},
     onToggleAutonomousCycle: () -> Unit,
     onToggleKillSwitch: (Boolean) -> Unit,
     onOpenConditions: () -> Unit,
     onOpenNarratives: () -> Unit = {},
+    onOpenTradingTerminal: () -> Unit = {},
     onOpenModule: (VipModuleId) -> Unit
 ) {
     var selectedAssetFilter by remember { mutableStateOf<AssetClass?>(null) }
@@ -285,6 +289,14 @@ fun CommandCentreScreen(
             }
         }
 
+        // Paper Equity, P&L, Sentiment Split & Macro Pulse HUD
+        item {
+            InstitutionalAccountAndSentimentHud(
+                structure = state.marketStructureSnapshot,
+                conditions = state.marketConditions
+            )
+        }
+
         // Live Market Conditions Card (tap to open full Live Market Conditions screen)
         item {
             GlassCard(
@@ -408,7 +420,7 @@ fun CommandCentreScreen(
             }
         }
 
-        // Selected Instrument Live Chart
+        // Selected Instrument TradingView & Setup Architect Chart
         if (selectedQuote != null) {
             item {
                 GlassCard(borderColor = MetallicGold.copy(alpha = 0.4f)) {
@@ -417,11 +429,13 @@ fun CommandCentreScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "${selectedQuote.instrument.symbol} · ${selectedQuote.instrument.displayName}",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = IvoryText
+                                color = IvoryText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "${selectedQuote.sourceName} · ${selectedQuote.latencyMs}ms",
@@ -443,7 +457,30 @@ fun CommandCentreScreen(
                         }
                     }
                     Spacer(modifier = Modifier.height(10.dp))
-                    CandleChartCanvas(candles = selectedQuote.candles)
+                    TradingViewTerminalCard(
+                        selectedQuote = selectedQuote,
+                        allQuotes = state.quotes,
+                        setupPlan = state.activeSetupPlan,
+                        timeframe = state.selectedChartTimeframe,
+                        onSelectTimeframe = onSelectTimeframe,
+                        onSelectSymbol = onSelectSymbol,
+                        chartHeightDp = 250
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = onOpenTradingTerminal,
+                        border = BorderStroke(1.dp, MetallicGold),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("open_trading_terminal_button")
+                    ) {
+                        Text(
+                            text = "Open TradingView & Setup Architect Terminal →",
+                            color = MetallicGoldBright,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 }
             }
         }

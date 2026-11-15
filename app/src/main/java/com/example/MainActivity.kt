@@ -92,6 +92,7 @@ import com.example.ui.screens.RiskDefenceMatrixScreen
 import com.example.ui.screens.SovereignCouncilScreen
 import com.example.ui.screens.StrategyArenaScreen
 import com.example.ui.screens.StrategyDnaLabScreen
+import com.example.ui.screens.TradingTerminalScreen
 import com.example.ui.screens.signOutAetherion
 import com.example.ui.theme.AetherionTheme
 import com.example.ui.theme.ChampagneSecondary
@@ -118,6 +119,7 @@ import kotlinx.coroutines.flow.callbackFlow
 const val ROUTE_COMMAND_CENTRE = "command_centre"
 const val ROUTE_MARKET_CONDITIONS = "market_conditions"
 const val ROUTE_NARRATIVE_INTELLIGENCE = "narrative_intelligence"
+const val ROUTE_TRADING_TERMINAL = "trading_terminal"
 const val ROUTE_MODULES_DIRECTORY = "modules_directory"
 const val ROUTE_OVERMIND = "overmind"
 const val ROUTE_RISK_MATRIX = "risk_matrix"
@@ -400,11 +402,15 @@ private fun AetherionAppShell(
                                 state = state,
                                 onRefreshMarkets = { viewModel.refreshMarketsAndAnalytics() },
                                 onSelectSymbol = { viewModel.selectSymbol(it) },
+                                onSelectTimeframe = { viewModel.setChartTimeframe(it) },
                                 onToggleAutonomousCycle = { viewModel.toggleAutonomousCycle() },
                                 onToggleKillSwitch = { viewModel.toggleEmergencyKillSwitch(it) },
                                 onOpenConditions = { navigateTopTab(ROUTE_MARKET_CONDITIONS) },
                                 onOpenNarratives = {
                                     navController.navigate(ROUTE_NARRATIVE_INTELLIGENCE) { launchSingleTop = true }
+                                },
+                                onOpenTradingTerminal = {
+                                    navController.navigate(ROUTE_TRADING_TERMINAL) { launchSingleTop = true }
                                 },
                                 onOpenModule = ::openModule
                             )
@@ -430,11 +436,32 @@ private fun AetherionAppShell(
                             )
                         }
 
+                        composable(ROUTE_TRADING_TERMINAL) {
+                            TradingTerminalScreen(
+                                state = state,
+                                onSelectSymbol = { viewModel.selectSymbol(it) },
+                                onSelectTimeframe = { viewModel.setChartTimeframe(it) },
+                                onSelectDirectionBias = { viewModel.setSetupDirectionBias(it) },
+                                onRefineSetupWithAi = { viewModel.refineActiveSetupWithAi() },
+                                onExecuteSetupOrder = { mt5 -> viewModel.executeActiveSetupOrder(mt5) },
+                                onExecuteTerminalTicket = { side, exp, sl, tp, mt5 ->
+                                    viewModel.executeTerminalTicketOrder(side, exp, sl, tp, mt5)
+                                },
+                                onClosePaperOrder = { viewModel.closePaperOrder(it) },
+                                onPickChartScreenshot = { uri -> viewModel.analyzeUploadedChartScreenshot(context, uri) },
+                                onOpenEventEngine = { openModule(VipModuleId.GLOBAL_EVENT_IMPACT_ENGINE) },
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
                         composable(ROUTE_MODULES_DIRECTORY) {
                             ModulesDirectoryScreen(
                                 state = state,
                                 onOpenNarratives = {
                                     navController.navigate(ROUTE_NARRATIVE_INTELLIGENCE) { launchSingleTop = true }
+                                },
+                                onOpenTradingTerminal = {
+                                    navController.navigate(ROUTE_TRADING_TERMINAL) { launchSingleTop = true }
                                 },
                                 onOpenModule = ::openModule
                             )
@@ -506,6 +533,8 @@ private fun AetherionAppShell(
                                 VipModuleId.STRATEGY_DNA_LAB -> StrategyDnaLabScreen(
                                     state = state,
                                     onMutateStrategy = { viewModel.mutateAndBacktestStrategy(it) },
+                                    onSelectQuantTarget = { target, strat -> viewModel.selectQuantCodeTarget(target, strat) },
+                                    onAuditQuantCode = { strat -> viewModel.auditQuantCodeWithAi(strat) },
                                     onBack = onBack
                                 )
                                 VipModuleId.GLOBAL_CAPITAL_FLOW_RADAR -> CapitalFlowRadarScreen(
@@ -582,8 +611,15 @@ private fun AetherionAppShell(
                                     state = state,
                                     onRefreshHeadlines = { viewModel.refreshHeadlines() },
                                     onAnalyzeHeadline = { viewModel.analyzeHeadlineImpact(it) },
+                                    onSelectSymbolAndOpenChart = { sym ->
+                                        viewModel.selectSymbol(sym)
+                                        navController.navigate(ROUTE_TRADING_TERMINAL) { launchSingleTop = true }
+                                    },
                                     onOpenNarratives = {
                                         navController.navigate(ROUTE_NARRATIVE_INTELLIGENCE) { launchSingleTop = true }
+                                    },
+                                    onOpenTradingTerminal = {
+                                        navController.navigate(ROUTE_TRADING_TERMINAL) { launchSingleTop = true }
                                     },
                                     onBack = onBack
                                 )

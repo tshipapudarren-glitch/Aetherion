@@ -1,5 +1,6 @@
 package com.example.data.remote
 
+import android.graphics.Bitmap
 import android.util.Log
 import com.example.core.security.ApiSecretsResolver
 import com.example.data.model.AiProviderType
@@ -7,6 +8,7 @@ import com.example.data.model.ProviderSettings
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.Schema
+import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +61,32 @@ data class FactoryAiProposal(
     val slowPeriod: Int,
     val atrStopMult: Double,
     val atrTargetMult: Double,
+    val providerUsed: String
+)
+
+data class SetupArchitectAiProposal(
+    val direction: String,
+    val entryPrice: Double,
+    val stopLoss: Double,
+    val tp1: Double,
+    val tp2: Double,
+    val tp3: Double,
+    val confidencePct: Int,
+    val structuralThesis: String,
+    val eventAlignmentNote: String,
+    val providerUsed: String
+)
+
+data class ChartVisionAnalysis(
+    val detectedPattern: String,
+    val marketStructureState: String,
+    val bias: String,
+    val confidencePct: Int,
+    val entryZone: String,
+    val stopLossLevel: String,
+    val takeProfitLevels: String,
+    val invalidationCondition: String,
+    val fullExplanation: String,
     val providerUsed: String
 )
 
@@ -118,6 +146,34 @@ class MultiProviderAiGateway {
             "slowPeriod" to Schema.integer(description = "Slow EMA lookback 20..90"),
             "atrStopMult" to Schema.double(description = "ATR stop multiplier 0.8..3.5"),
             "atrTargetMult" to Schema.double(description = "ATR target multiplier 1.2..6.0")
+        )
+    )
+
+    private val setupArchitectSchema = Schema.obj(
+        properties = mapOf(
+            "direction" to Schema.enumeration(listOf("LONG", "SHORT")),
+            "entryPrice" to Schema.double(description = "Recommended tactical entry price near current spot"),
+            "stopLoss" to Schema.double(description = "Invalidation stop loss price"),
+            "tp1" to Schema.double(description = "First partial take-profit target (~1.2R)"),
+            "tp2" to Schema.double(description = "Primary structural target (~2.2R)"),
+            "tp3" to Schema.double(description = "Extended macro target (~3.5R)"),
+            "confidencePct" to Schema.integer(description = "Setup confidence 0..100"),
+            "structuralThesis" to Schema.string(description = "Price action & market structure rationale"),
+            "eventAlignmentNote" to Schema.string(description = "Alignment with macro events & positioning")
+        )
+    )
+
+    private val chartVisionSchema = Schema.obj(
+        properties = mapOf(
+            "detectedPattern" to Schema.string(description = "Identified chart setup or pattern e.g. Liquidity Sweep, FVG, Order Block, BOS"),
+            "marketStructureState" to Schema.string(description = "Structural trend, BOS/CHoCH state, and key supply/demand zones"),
+            "bias" to Schema.enumeration(listOf("BULLISH", "BEARISH", "NEUTRAL")),
+            "confidencePct" to Schema.integer(description = "0 to 100 confidence score"),
+            "entryZone" to Schema.string(description = "Proposed entry zone or trigger price"),
+            "stopLossLevel" to Schema.string(description = "Invalidation stop-loss zone"),
+            "takeProfitLevels" to Schema.string(description = "TP1 / TP2 / TP3 structural targets"),
+            "invalidationCondition" to Schema.string(description = "Exact condition that invalidates the chart setup"),
+            "fullExplanation" to Schema.string(description = "Institutional Chart Vision breakdown of candles, liquidity & risk")
         )
     )
 
@@ -293,6 +349,146 @@ class MultiProviderAiGateway {
             Log.e(TAG, "Strategy proposal failed", e)
             Result.failure(e)
         }
+    }
+
+    suspend fun refineTradeSetup(
+        symbol: String,
+        setupContext: String,
+        settings: ProviderSettings
+    ): Result<SetupArchitectAiProposal> {
+        val prompt = """
+            You are AETHERION SETUP ARCHITECT & LIQUIDITY X.
+            Refine Entry, Stop Loss (SL), TP1, TP2, and TP3 chart-drawing levels for $symbol given live market structure, RSI(14), MA50, ATR14, macro events, and market positioning:
+            $setupContext
+
+            Rules:
+            - Entry must stay tightly anchored near current live price.
+            - For LONG: SL < Entry < TP1 < TP2 < TP3.
+            - For SHORT: SL > Entry > TP1 > TP2 > TP3.
+            - Respect Risk Guard rules and central bank / geopolitical volatility risk.
+        """.trimIndent()
+
+        return try {
+            val raw = executeStructuredCall(
+                prompt = prompt,
+                geminiSchema = setupArchitectSchema,
+                jsonKeysHint = "direction (LONG|SHORT), entryPrice, stopLoss, tp1, tp2, tp3, confidencePct (int), structuralThesis, eventAlignmentNote",
+                settings = settings
+            )
+            val json = JSONObject(extractJsonObject(raw))
+            Result.success(
+                SetupArchitectAiProposal(
+                    direction = json.optString("direction", "LONG"),
+                    entryPrice = json.optDouble("entryPrice", 0.0),
+                    stopLoss = json.optDouble("stopLoss", 0.0),
+                    tp1 = json.optDouble("tp1", 0.0),
+                    tp2 = json.optDouble("tp2", 0.0),
+                    tp3 = json.optDouble("tp3", 0.0),
+                    confidencePct = json.optInt("confidencePct", 65).coerceIn(15, 98),
+                    structuralThesis = json.optString("structuralThesis", "Institutional liquidity structure setup."),
+                    eventAlignmentNote = json.optString("eventAlignmentNote", "Aligned with macro & positioning matrix."),
+                    providerUsed = resolveProviderLabel(settings)
+                )
+            )
+        } catch (e: TimeoutCancellationException) {
+            Result.failure(IllegalStateException("Setup Architect AI timed out after 60s."))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Setup Architect AI failed", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun analyzeChartScreenshot(
+        bitmap: Bitmap,
+        symbol: String,
+        timeframe: String,
+        marketContext: String,
+        settings: ProviderSettings
+    ): Result<ChartVisionAnalysis> {
+        val modelName = if (settings.activeProvider == AiProviderType.FIREBASE_GEMINI_ARGON) {
+            "gemini-4-argon"
+        } else {
+            "gemini-3.8-flash"
+        }
+        val prompt = """
+            You are AETHERION CHART VISION & STRUCTURE AGENT.
+            Inspect the uploaded trading chart screenshot alongside live telemetry ($symbol · $timeframe):
+            $marketContext
+
+            Identify:
+            1. Dominant structural pattern (Breakout & Retest, Liquidity Sweep, Fair Value Gap, Order Block, BOS/CHoCH, Supply/Demand, or Reversal).
+            2. Market structure state and liquidity pools visible on the chart.
+            3. Actionable Entry zone, Stop Loss invalidation, TP1/TP2/TP3 targets, and invalidation rule.
+            Never promise guaranteed returns; flag ambiguity clearly if screenshot candles or price axis are unclear.
+        """.trimIndent()
+
+        return try {
+            val visionModel = Firebase.ai.generativeModel(
+                modelName = modelName,
+                generationConfig = generationConfig {
+                    responseMimeType = "application/json"
+                    responseSchema = chartVisionSchema
+                }
+            )
+            val raw = withTimeout(60_000L) {
+                visionModel.generateContent(
+                    content {
+                        image(bitmap)
+                        text(prompt)
+                    }
+                ).text
+            } ?: throw IllegalStateException("Chart Vision returned an empty response.")
+
+            val json = JSONObject(extractJsonObject(raw))
+            Result.success(
+                ChartVisionAnalysis(
+                    detectedPattern = json.optString("detectedPattern", "Structure & Liquidity Setup"),
+                    marketStructureState = json.optString("marketStructureState", "Inspecting BOS / CHoCH shelves"),
+                    bias = json.optString("bias", "NEUTRAL"),
+                    confidencePct = json.optInt("confidencePct", 62).coerceIn(10, 96),
+                    entryZone = json.optString("entryZone", "Await breakout/retest confirmation"),
+                    stopLossLevel = json.optString("stopLossLevel", "Beyond opposing swing invalidation"),
+                    takeProfitLevels = json.optString("takeProfitLevels", "1.2R / 2.2R / 3.5R liquidity pools"),
+                    invalidationCondition = json.optString("invalidationCondition", "H1 close against structure shelf"),
+                    fullExplanation = json.optString("fullExplanation", raw.take(360)),
+                    providerUsed = "Firebase AI Logic · $modelName Vision"
+                )
+            )
+        } catch (e: TimeoutCancellationException) {
+            Log.e(TAG, "Chart Vision timed out", e)
+            Result.failure(IllegalStateException("Chart Vision analysis timed out after 60s."))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Chart Vision failed", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun auditAndEnhanceQuantCode(
+        strategyName: String,
+        targetLabel: String,
+        sourceCode: String,
+        settings: ProviderSettings
+    ): Result<String> {
+        val systemRole = "You are AETHERION CODE AUDITOR & EA ENGINEER. Inspect $targetLabel code for lookahead bias, missing stop-loss guards, spread/slippage checks, array bounds safety, and execution robustness."
+        val prompt = """
+            Strategy: $strategyName
+            Target Language: $targetLabel
+
+            Source Code:
+            ```
+            $sourceCode
+            ```
+
+            Return a concise institutional audit verdict covering:
+            1. Safety & Repainting Audit (Pass/Risks found)
+            2. Risk Guard Compliance (Stop loss, lot sizing, spread filter)
+            3. Concrete parameter or code improvement recommendations.
+        """.trimIndent()
+        return queryFreeformIntelligence(systemRole, prompt, settings)
     }
 
     suspend fun queryFreeformIntelligence(
