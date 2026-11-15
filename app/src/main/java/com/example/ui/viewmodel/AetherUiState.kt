@@ -11,10 +11,12 @@ import com.example.data.model.AutonomousCycleState
 import com.example.data.model.CrossModuleEvent
 import com.example.data.model.MarketConditionsSnapshot
 import com.example.data.model.MarketQuote
+import com.example.data.model.MemoryTier
 import com.example.data.model.NewsHeadline
 import com.example.data.model.ProviderDiagnostic
 import com.example.data.model.ProviderSettings
 import com.example.data.model.RiskCheckResult
+import com.example.data.remote.ArenaAiVerdict
 import com.example.data.remote.BrokerHealthReport
 import com.example.data.remote.ChartVisionAnalysis
 import com.example.data.remote.CouncilVoteResult
@@ -29,6 +31,7 @@ import com.example.domain.engine.BlackSwanTelemetry
 import com.example.domain.engine.CurrencyStrengthItem
 import com.example.domain.engine.EventImpactIntelligenceSnapshot
 import com.example.domain.engine.GlobalCapitalFlowSnapshot
+import com.example.domain.engine.KnowledgeArenaSnapshot
 import com.example.domain.engine.MarketStructureSnapshot
 import com.example.domain.engine.MultiverseScenarioReport
 import com.example.domain.engine.NarrativeIntelligenceSnapshot
@@ -108,6 +111,13 @@ data class AetherDashboardState(
     val factoryStatusMessage: String = "Ready to discover & evolve quantitative candidates.",
     val isFactoryRunning: Boolean = false,
     val memorySynthesisState: AiTaskState<String> = AiTaskState.Idle,
+
+    // AETHERION Knowledge <-> Arena AI
+    val knowledgeArenaSnapshot: KnowledgeArenaSnapshot = KnowledgeArenaSnapshot(),
+    val selectedKnowledgeTier: MemoryTier? = null,
+    val knowledgeSearchQuery: String = "",
+    val knowledgeDistillState: AiTaskState<String> = AiTaskState.Idle,
+    val arenaAiState: AiTaskState<ArenaAiVerdict> = AiTaskState.Idle,
 
     // Voice Conversations (Gemini 3.8 Live + Deepgram + ElevenLabs)
     val voiceCommandState: AiTaskState<String> = AiTaskState.Idle,

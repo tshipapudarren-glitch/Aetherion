@@ -41,8 +41,17 @@ interface LocalMemoryDao {
     @Query("SELECT * FROM local_memories ORDER BY createdAtMs DESC")
     fun observeAll(): Flow<List<LocalMemoryEntity>>
 
+    @Query("SELECT * FROM local_memories ORDER BY createdAtMs DESC")
+    suspend fun getAll(): List<LocalMemoryEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(memory: LocalMemoryEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(memories: List<LocalMemoryEntity>)
+
+    @Query("DELETE FROM local_memories WHERE id = :id")
+    suspend fun deleteById(id: String)
 }
 
 @Dao

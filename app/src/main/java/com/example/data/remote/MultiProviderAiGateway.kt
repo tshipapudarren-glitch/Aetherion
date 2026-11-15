@@ -90,6 +90,28 @@ data class ChartVisionAnalysis(
     val providerUsed: String
 )
 
+data class ArenaAiVerdict(
+    val symbol: String,
+    val championStrategyName: String,
+    val matchupSummary: String,
+    val knowledgeCitationsUsed: List<String>,
+    val tacticalAdjustment: String,
+    val riskGuardCompliance: String,
+    val postMatchLessonTitle: String,
+    val postMatchLessonBody: String,
+    val confidencePct: Int,
+    val providerUsed: String
+)
+
+data class DistilledKnowledgeProposal(
+    val tierName: String,
+    val title: String,
+    val content: String,
+    val symbol: String,
+    val confidenceScore: Double,
+    val providerUsed: String
+)
+
 class MultiProviderAiGateway {
 
     private val httpClient = OkHttpClient.Builder()
@@ -174,6 +196,29 @@ class MultiProviderAiGateway {
             "takeProfitLevels" to Schema.string(description = "TP1 / TP2 / TP3 structural targets"),
             "invalidationCondition" to Schema.string(description = "Exact condition that invalidates the chart setup"),
             "fullExplanation" to Schema.string(description = "Institutional Chart Vision breakdown of candles, liquidity & risk")
+        )
+    )
+
+    private val arenaAiSchema = Schema.obj(
+        properties = mapOf(
+            "championStrategyName" to Schema.string(description = "Winning strategy contender name"),
+            "matchupSummary" to Schema.string(description = "Comparative head-to-head ruling on Sharpe, drawdown, and regime fit"),
+            "knowledgeCitationsUsed" to Schema.array(Schema.string(), description = "Titles of cited AETHERION Knowledge rules that shaped the decision"),
+            "tacticalAdjustment" to Schema.string(description = "Concrete parameter or execution filter adjustment from the Knowledge Base"),
+            "riskGuardCompliance" to Schema.string(description = "Verification against drawdown, spread, and permission limits"),
+            "postMatchLessonTitle" to Schema.string(description = "Concise reusable Knowledge Base lesson title"),
+            "postMatchLessonBody" to Schema.string(description = "Actionable post-match rule to commit back into AETHERION Knowledge"),
+            "confidencePct" to Schema.integer(description = "0 to 100 ruling confidence")
+        )
+    )
+
+    private val distillKnowledgeSchema = Schema.obj(
+        properties = mapOf(
+            "tierName" to Schema.enumeration(listOf("MARKET_MEMORY", "STRATEGY_MEMORY", "DECISION_MEMORY", "EXECUTION_MEMORY", "INTELLIGENCE_MEMORY")),
+            "title" to Schema.string(description = "Short authoritative playbook or heuristic title"),
+            "content" to Schema.string(description = "Actionable institutional rule distilled from live telemetry, strategy stats, and trade outcomes"),
+            "symbol" to Schema.string(description = "Target market symbol or GLOBAL"),
+            "confidenceScore" to Schema.double(description = "0.50 to 0.99 confidence score")
         )
     )
 
@@ -483,12 +528,115 @@ class MultiProviderAiGateway {
             $sourceCode
             ```
 
-            Return a concise institutional audit verdict covering:
+        Return a concise institutional audit verdict covering:
             1. Safety & Repainting Audit (Pass/Risks found)
             2. Risk Guard Compliance (Stop loss, lot sizing, spread filter)
             3. Concrete parameter or code improvement recommendations.
         """.trimIndent()
         return queryFreeformIntelligence(systemRole, prompt, settings)
+    }
+
+    suspend fun adjudicateArenaWithKnowledge(
+        symbol: String,
+        arenaContext: String,
+        knowledgeContext: String,
+        settings: ProviderSettings
+    ): Result<ArenaAiVerdict> {
+        val prompt = """
+            You are AETHERION ARENA AI & EDGE DETECTOR.
+            Adjudicate a head-to-head Strategy Championship Arena tournament on $symbol using retrieved AETHERION Knowledge playbooks.
+
+            Arena Contenders & Live Backtest Metrics:
+            $arenaContext
+
+            Retrieved AETHERION Knowledge Playbooks:
+            $knowledgeContext
+
+            Rules:
+            - Select the best champion based on risk-adjusted return, drawdown discipline, and alignment with the retrieved Knowledge Base rules.
+            - Explicitly cite which AETHERION Knowledge rules justify your ruling.
+            - Synthesize ONE concrete post-match lesson (title + body) that should be saved back into AETHERION Knowledge.
+        """.trimIndent()
+
+        return try {
+            val raw = executeStructuredCall(
+                prompt = prompt,
+                geminiSchema = arenaAiSchema,
+                jsonKeysHint = "championStrategyName, matchupSummary, knowledgeCitationsUsed (array), tacticalAdjustment, riskGuardCompliance, postMatchLessonTitle, postMatchLessonBody, confidencePct (int)",
+                settings = settings
+            )
+            val json = JSONObject(extractJsonObject(raw))
+            val citationsArr = json.optJSONArray("knowledgeCitationsUsed")
+            val citations = if (citationsArr != null) {
+                (0 until citationsArr.length()).map { citationsArr.optString(it) }.filter { it.isNotBlank() }
+            } else emptyList()
+            Result.success(
+                ArenaAiVerdict(
+                    symbol = symbol,
+                    championStrategyName = json.optString("championStrategyName", "Top Arena Contender"),
+                    matchupSummary = json.optString("matchupSummary", "Ranked via live candle backtest & knowledge context."),
+                    knowledgeCitationsUsed = citations,
+                    tacticalAdjustment = json.optString("tacticalAdjustment", "Maintain ATR stop discipline and Risk Guard spread ceiling."),
+                    riskGuardCompliance = json.optString("riskGuardCompliance", "Compliant with deterministic drawdown & exposure limits."),
+                    postMatchLessonTitle = json.optString("postMatchLessonTitle", "$symbol Arena Playbook Lesson"),
+                    postMatchLessonBody = json.optString("postMatchLessonBody", "Monitor volatility regime alignment before advancing graduation gates."),
+                    confidencePct = json.optInt("confidencePct", 78).coerceIn(20, 99),
+                    providerUsed = resolveProviderLabel(settings)
+                )
+            )
+        } catch (e: TimeoutCancellationException) {
+            Result.failure(IllegalStateException("Arena AI tournament timed out after 60s."))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Arena AI adjudication failed", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun distillKnowledgeFromTelemetry(
+        topic: String,
+        telemetryAndTrades: String,
+        defaultSymbol: String,
+        settings: ProviderSettings
+    ): Result<DistilledKnowledgeProposal> {
+        val prompt = """
+            You are AETHERION KNOWLEDGE DISTILLER & MEMORY MATRIX.
+            Distill an actionable institutional playbook rule or post-trade heuristic from live telemetry, strategy outcomes, and closed trades.
+            Focus Topic: "$topic"
+
+            Live Telemetry & History:
+            $telemetryAndTrades
+
+            Respond with structured JSON selecting the most fitting tierName (MARKET_MEMORY, STRATEGY_MEMORY, DECISION_MEMORY, EXECUTION_MEMORY, or INTELLIGENCE_MEMORY), concise title, concrete actionable content, target symbol (or GLOBAL), and confidenceScore (0.60..0.98).
+        """.trimIndent()
+
+        return try {
+            val raw = executeStructuredCall(
+                prompt = prompt,
+                geminiSchema = distillKnowledgeSchema,
+                jsonKeysHint = "tierName, title, content, symbol, confidenceScore",
+                settings = settings
+            )
+            val json = JSONObject(extractJsonObject(raw))
+            Result.success(
+                DistilledKnowledgeProposal(
+                    tierName = json.optString("tierName", "INTELLIGENCE_MEMORY"),
+                    title = json.optString("title", "Institutional Regime Playbook · $defaultSymbol"),
+                    content = json.optString("content", "Enforce ATR volatility sizing and Risk Guard compliance across regime shifts."),
+                    symbol = json.optString("symbol", defaultSymbol).ifBlank { defaultSymbol },
+                    confidenceScore = json.optDouble("confidenceScore", 0.86).coerceIn(0.50, 0.99),
+                    providerUsed = resolveProviderLabel(settings)
+                )
+            )
+        } catch (e: TimeoutCancellationException) {
+            Result.failure(IllegalStateException("Knowledge distillation timed out after 60s."))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Knowledge distillation failed", e)
+            Result.failure(e)
+        }
     }
 
     suspend fun queryFreeformIntelligence(

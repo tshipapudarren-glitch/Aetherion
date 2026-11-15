@@ -24,6 +24,7 @@ import com.example.data.model.ProviderSettings
 import com.example.data.model.RiskConfigRecord
 import com.example.data.model.StrategyRecord
 import com.example.data.model.StrategyStage
+import com.example.data.remote.ArenaAiVerdict
 import com.example.data.remote.BrokerBridgeClient
 import com.example.data.remote.FirestoreSyncRepository
 import com.example.data.remote.GeminiLiveVoiceEngine
@@ -35,6 +36,7 @@ import com.example.domain.engine.AetherEventBus
 import com.example.domain.engine.CapitalFlowEngine
 import com.example.domain.engine.DeterministicRiskEngine
 import com.example.domain.engine.EventImpactEngine
+import com.example.domain.engine.KnowledgeArenaEngine
 import com.example.domain.engine.MarketStructureEngine
 import com.example.domain.engine.NarrativeIntelligenceEngine
 import com.example.domain.engine.QuantCodeTarget
@@ -166,6 +168,28 @@ class AetherionViewModel(
                 seedStrategies.forEach { strat ->
                     firestoreRepo.upsertStrategy(strat.toFirestoreRecord(currentUserId))
                 }
+            }
+            if (localDb.localMemoryDao().getAll().isEmpty()) {
+                val playbooks = KnowledgeArenaEngine.starterPlaybooks()
+                localDb.localMemoryDao().insertAll(playbooks)
+                playbooks.forEach { mem ->
+                    firestoreRepo.createMemory(
+                        MemoryRecord(
+                            id = mem.id,
+                            userId = currentUserId,
+                            tier = mem.tier,
+                            title = mem.title,
+                            content = mem.content,
+                            symbol = mem.symbol,
+                            agentName = mem.agentName,
+                            confidenceScore = mem.confidenceScore
+                        )
+                    )
+                }
+                eventBus.publish(
+                    "AETHERION_KNOWLEDGE", "CHAMPIONSHIP_ARENA", "PLAYBOOKS_LINKED",
+                    "Seeded ${playbooks.size} institutional AETHERION Knowledge playbooks to Room + Firestore."
+                )
             }
             recordAudit(
                 moduleId = "AETHER_CORE",
@@ -513,6 +537,13 @@ class AetherionViewModel(
             strategyForSymbol?.let { MarketStructureEngine.generateQuantTemplate(it, current.selectedQuantTarget) }.orEmpty()
         }
         val quantAudit = if (quantCode.isNotBlank()) MarketStructureEngine.auditQuantSource(quantCode) else current.quantStaticAuditFindings
+        val knowledgeArena = KnowledgeArenaEngine.buildSnapshot(
+            strategies = current.strategies,
+            memories = current.memories,
+            quotes = current.quotes,
+            selectedSymbol = current.selectedSymbol,
+            marketConditions = current.marketConditions
+        )
 
         _state.update {
             it.copy(
@@ -528,7 +559,8 @@ class AetherionViewModel(
                 activeSetupPlan = setupPlan,
                 marketStructureSnapshot = marketStructure,
                 generatedQuantCode = quantCode,
-                quantStaticAuditFindings = quantAudit
+                quantStaticAuditFindings = quantAudit,
+                knowledgeArenaSnapshot = knowledgeArena
             )
         }
     }
@@ -1424,6 +1456,172 @@ class AetherionViewModel(
                 _state.update { it.copy(memorySynthesisState = AiTaskState.Error(err.localizedMessage ?: "Memory synthesis failed")) }
             }
         }
+    }
+
+    fun setKnowledgeSearch(query: String) {
+        _state.update { it.copy(knowledgeSearchQuery = query) }
+    }
+
+    fun setKnowledgeTierFilter(tier: MemoryTier?) {
+        _state.update { it.copy(selectedKnowledgeTier = tier) }
+    }
+
+    fun boostKnowledgeConfidence(entry: LocalMemoryEntity) {
+        viewModelScope.launch {
+            val boosted = entry.copy(confidenceScore = (entry.confidenceScore + 0.05).coerceAtMost(0.99))
+            localDb.localMemoryDao().insert(boosted)
+            recordAudit(
+                "AETHERION_KNOWLEDGE",
+                "MEMORY MATRIX",
+                "Reinforced knowledge confidence (${entry.title})",
+                AuditOutcome.APPROVED,
+                "Confidence ${(entry.confidenceScore * 100).toInt()}% -> ${(boosted.confidenceScore * 100).toInt()}%"
+            )
+        }
+    }
+
+    fun deleteKnowledgeEntry(entryId: String) {
+        viewModelScope.launch {
+            localDb.localMemoryDao().deleteById(entryId)
+            recordAudit(
+                "AETHERION_KNOWLEDGE",
+                "COMMANDER",
+                "Archived obsolete knowledge entry ($entryId)",
+                AuditOutcome.INFO,
+                "Removed from local Knowledge Vault."
+            )
+        }
+    }
+
+    fun distillKnowledgeWithAi(topicPrompt: String) {
+        val current = _state.value
+        val focus = topicPrompt.trim().ifBlank { "Cross-asset regime edge for ${current.selectedSymbol}" }
+        viewModelScope.launch {
+            _state.update { it.copy(knowledgeDistillState = AiTaskState.Loading) }
+            val marketSummary = current.quotes.filter { it.isLive }.take(6).joinToString("; ") {
+                "${it.instrument.symbol}=${it.price}(${String.format(Locale.US, "%+.2f%%", it.changePct)}, Vol ${String.format(Locale.US, "%.1f%%", it.realizedVolPct)})"
+            }
+            val stratSummary = current.strategies.take(5).joinToString("; ") {
+                "${it.name}[${it.symbol}]: Sharpe=${String.format(Locale.US, "%.2f", it.sharpeRatio)}, DD=${String.format(Locale.US, "%.1f%%", it.maxDrawdownPct)}"
+            }
+            val closedOrders = current.paperOrders.filter { it.status == "CLOSED" }.take(5).joinToString("; ") {
+                "${it.symbol} ${it.side} ${String.format(Locale.US, "%+.2f%%", it.pnlPct)} (${it.strategyName})"
+            }.ifBlank { "No closed paper trades yet." }
+            val telemetry = """
+                Macro Regime: ${current.marketConditions.overallRegime}, Vol: ${current.marketConditions.volatilityRegime}, Risk Appetite: ${current.marketConditions.riskAppetiteScore}/100
+                Live Markets: $marketSummary
+                Top Strategies: $stratSummary
+                Recent Closed Trades: $closedOrders
+            """.trimIndent()
+
+            aiGateway.distillKnowledgeFromTelemetry(
+                topic = focus,
+                telemetryAndTrades = telemetry,
+                defaultSymbol = current.selectedSymbol,
+                settings = current.providerSettings
+            ).onSuccess { proposal ->
+                val tier = runCatching { MemoryTier.valueOf(proposal.tierName) }.getOrDefault(MemoryTier.INTELLIGENCE_MEMORY)
+                saveMemoryEntry(
+                    tier = tier,
+                    title = proposal.title,
+                    content = proposal.content,
+                    symbol = proposal.symbol,
+                    agentName = "KNOWLEDGE DISTILLER",
+                    confidence = proposal.confidenceScore
+                )
+                _state.update {
+                    it.copy(
+                        knowledgeDistillState = AiTaskState.Success(
+                            "Distilled [${tier.label}] ${proposal.title} (${(proposal.confidenceScore * 100).toInt()}% conf · ${proposal.providerUsed})"
+                        ),
+                        statusBanner = "AETHERION Knowledge updated: ${proposal.title}"
+                    )
+                }
+                eventBus.publish(
+                    "AETHERION_KNOWLEDGE",
+                    "CHAMPIONSHIP_ARENA",
+                    "KNOWLEDGE_DISTILLED",
+                    "New ${proposal.symbol} playbook injected into Arena AI context."
+                )
+                recordAudit(
+                    "AETHERION_KNOWLEDGE",
+                    "MEMORY MATRIX",
+                    "Distilled institutional knowledge entry",
+                    AuditOutcome.APPROVED,
+                    "${proposal.title} (${proposal.symbol}, ${proposal.providerUsed})"
+                )
+            }.onFailure { err ->
+                _state.update {
+                    it.copy(knowledgeDistillState = AiTaskState.Error(err.localizedMessage ?: "Knowledge distillation failed"))
+                }
+            }
+        }
+    }
+
+    fun runArenaAiMatchupWithKnowledge() {
+        val current = _state.value
+        val snap = current.knowledgeArenaSnapshot
+        if (snap.contenderRankings.isEmpty()) {
+            _state.update { it.copy(arenaAiState = AiTaskState.Error("No contenders available in Strategy Championship Arena.")) }
+            return
+        }
+
+        viewModelScope.launch {
+            _state.update { it.copy(arenaAiState = AiTaskState.Loading) }
+            val arenaContext = snap.contenderRankings.take(5).joinToString("\n") { r ->
+                "#${r.rank} ${r.strategy.name} [${r.strategy.symbol} | ${r.strategy.stage}]: Composite=${String.format(Locale.US, "%.1f", r.compositeScore)}pts (Quant=${String.format(Locale.US, "%.1f", r.baseQuantScore)} + KnowledgeBuff=+${String.format(Locale.US, "%.1f", r.knowledgeBuffPts)}), Sharpe=${String.format(Locale.US, "%.2f", r.strategy.sharpeRatio)}, DD=${String.format(Locale.US, "%.1f%%", r.strategy.maxDrawdownPct)}, Genome=${r.strategy.genomeSummary}"
+            }
+            val citations = (snap.activeSymbolCitations + snap.contenderRankings.flatMap { it.matchedKnowledge })
+                .distinctBy { it.memoryId }
+                .take(6)
+            val knowledgeContext = citations.joinToString("\n") { c ->
+                "[${c.categoryBadge} | ${c.symbol} | ${c.relevanceScorePct}% Match | Conf ${(c.confidenceScore * 100).toInt()}%] ${c.title}: ${c.content}"
+            }.ifBlank { "No matching AETHERION Knowledge playbooks recorded yet." }
+
+            aiGateway.adjudicateArenaWithKnowledge(
+                symbol = current.selectedSymbol,
+                arenaContext = arenaContext,
+                knowledgeContext = knowledgeContext,
+                settings = current.providerSettings
+            ).onSuccess { verdict ->
+                _state.update { it.copy(arenaAiState = AiTaskState.Success(verdict)) }
+                eventBus.publish(
+                    "CHAMPIONSHIP_ARENA",
+                    "AETHERION_KNOWLEDGE",
+                    "ARENA_AI_VERDICT",
+                    "Champion: ${verdict.championStrategyName} (${verdict.confidencePct}% conf, ${verdict.knowledgeCitationsUsed.size} Knowledge citations)."
+                )
+                recordAudit(
+                    "CHAMPIONSHIP_ARENA",
+                    "EDGE DETECTOR",
+                    "Arena AI Knowledge-informed ruling (${current.selectedSymbol})",
+                    AuditOutcome.APPROVED,
+                    "Champion=${verdict.championStrategyName}; Lesson=${verdict.postMatchLessonTitle}"
+                )
+            }.onFailure { err ->
+                _state.update {
+                    it.copy(arenaAiState = AiTaskState.Error(err.localizedMessage ?: "Arena AI tournament failed"))
+                }
+            }
+        }
+    }
+
+    fun saveArenaVerdictToKnowledge(verdict: ArenaAiVerdict) {
+        saveMemoryEntry(
+            tier = MemoryTier.STRATEGY_MEMORY,
+            title = verdict.postMatchLessonTitle,
+            content = "${verdict.postMatchLessonBody} (Champion: ${verdict.championStrategyName} · Adjustment: ${verdict.tacticalAdjustment})",
+            symbol = verdict.symbol,
+            agentName = "ARENA AI",
+            confidence = (verdict.confidencePct / 100.0).coerceIn(0.65, 0.98)
+        )
+        _state.update { it.copy(statusBanner = "Committed Arena AI post-match lesson to AETHERION Knowledge.") }
+        eventBus.publish(
+            "CHAMPIONSHIP_ARENA",
+            "AETHERION_KNOWLEDGE",
+            "POST_MATCH_LEARNED",
+            "Persisted '${verdict.postMatchLessonTitle}' to Room + Firestore."
+        )
     }
 
     // Module 11: Commander Voice Intelligence (Gemini 3.8 Live + Deepgram + ElevenLabs)

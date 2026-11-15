@@ -72,11 +72,11 @@ import com.example.data.local.SettingsPreferences
 import com.example.data.model.VipModuleId
 import com.example.data.remote.FirestoreSyncRepository
 import com.example.ui.screens.AetherionAuthScreen
+import com.example.ui.screens.AetherionKnowledgeScreen
 import com.example.ui.screens.AutonomousStrategyFactoryScreen
 import com.example.ui.screens.BlackSwanPredictorScreen
 import com.example.ui.screens.BrokerIntelligenceScreen
 import com.example.ui.screens.CapitalFlowRadarScreen
-import com.example.ui.screens.CollectiveMemoryScreen
 import com.example.ui.screens.CommandCentreScreen
 import com.example.ui.screens.CommanderVoiceScreen
 import com.example.ui.screens.GlobalEventImpactScreen
@@ -123,6 +123,7 @@ const val ROUTE_TRADING_TERMINAL = "trading_terminal"
 const val ROUTE_MODULES_DIRECTORY = "modules_directory"
 const val ROUTE_OVERMIND = "overmind"
 const val ROUTE_RISK_MATRIX = "risk_matrix"
+const val ROUTE_KNOWLEDGE_BASE = "aetherion_knowledge"
 const val ROUTE_INTEGRATIONS = "integrations"
 const val ROUTE_MODULE_PATTERN = "module/{moduleNumber}"
 
@@ -412,6 +413,9 @@ private fun AetherionAppShell(
                                 onOpenTradingTerminal = {
                                     navController.navigate(ROUTE_TRADING_TERMINAL) { launchSingleTop = true }
                                 },
+                                onOpenKnowledge = {
+                                    navController.navigate(ROUTE_KNOWLEDGE_BASE) { launchSingleTop = true }
+                                },
                                 onOpenModule = ::openModule
                             )
                         }
@@ -463,7 +467,27 @@ private fun AetherionAppShell(
                                 onOpenTradingTerminal = {
                                     navController.navigate(ROUTE_TRADING_TERMINAL) { launchSingleTop = true }
                                 },
+                                onOpenKnowledge = {
+                                    navController.navigate(ROUTE_KNOWLEDGE_BASE) { launchSingleTop = true }
+                                },
                                 onOpenModule = ::openModule
+                            )
+                        }
+
+                        composable(ROUTE_KNOWLEDGE_BASE) {
+                            AetherionKnowledgeScreen(
+                                state = state,
+                                onSearchChanged = { viewModel.setKnowledgeSearch(it) },
+                                onSelectTierFilter = { viewModel.setKnowledgeTierFilter(it) },
+                                onSaveKnowledge = { tier, title, body, sym ->
+                                    viewModel.saveMemoryEntry(tier, title, body, sym)
+                                },
+                                onDistillKnowledgeWithAi = { viewModel.distillKnowledgeWithAi(it) },
+                                onQueryMemoryAi = { viewModel.queryCollectiveMemoryWithAi(it) },
+                                onBoostConfidence = { viewModel.boostKnowledgeConfidence(it) },
+                                onDeleteEntry = { viewModel.deleteKnowledgeEntry(it) },
+                                onOpenArenaAi = { openModule(VipModuleId.STRATEGY_CHAMPIONSHIP_ARENA) },
+                                onBack = { navController.popBackStack() }
                             )
                         }
 
@@ -551,9 +575,15 @@ private fun AetherionAppShell(
                                 )
                                 VipModuleId.STRATEGY_CHAMPIONSHIP_ARENA -> StrategyArenaScreen(
                                     state = state,
+                                    onSelectSymbol = { viewModel.selectSymbol(it) },
                                     onPromoteStrategy = { strat, stage -> viewModel.promoteOrRetireStrategy(strat, stage) },
                                     onExecutePaper = { strat, side, exp ->
                                         viewModel.executeAuthorisedTrade(strat, side, exp, routeToMt5Bridge = false)
+                                    },
+                                    onRunArenaAi = { viewModel.runArenaAiMatchupWithKnowledge() },
+                                    onSaveArenaLessonToKnowledge = { viewModel.saveArenaVerdictToKnowledge(it) },
+                                    onOpenKnowledge = {
+                                        navController.navigate(ROUTE_KNOWLEDGE_BASE) { launchSingleTop = true }
                                     },
                                     onBack = onBack
                                 )
@@ -578,12 +608,18 @@ private fun AetherionAppShell(
                                     state = state,
                                     onBack = onBack
                                 )
-                                VipModuleId.COLLECTIVE_INTELLIGENCE_MEMORY -> CollectiveMemoryScreen(
+                                VipModuleId.COLLECTIVE_INTELLIGENCE_MEMORY -> AetherionKnowledgeScreen(
                                     state = state,
-                                    onSaveMemory = { tier, title, body, sym ->
+                                    onSearchChanged = { viewModel.setKnowledgeSearch(it) },
+                                    onSelectTierFilter = { viewModel.setKnowledgeTierFilter(it) },
+                                    onSaveKnowledge = { tier, title, body, sym ->
                                         viewModel.saveMemoryEntry(tier, title, body, sym)
                                     },
+                                    onDistillKnowledgeWithAi = { viewModel.distillKnowledgeWithAi(it) },
                                     onQueryMemoryAi = { viewModel.queryCollectiveMemoryWithAi(it) },
+                                    onBoostConfidence = { viewModel.boostKnowledgeConfidence(it) },
+                                    onDeleteEntry = { viewModel.deleteKnowledgeEntry(it) },
+                                    onOpenArenaAi = { openModule(VipModuleId.STRATEGY_CHAMPIONSHIP_ARENA) },
                                     onBack = onBack
                                 )
                                 VipModuleId.COMMANDER_VOICE_INTELLIGENCE -> CommanderVoiceScreen(

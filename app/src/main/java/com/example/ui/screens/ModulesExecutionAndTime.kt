@@ -19,24 +19,17 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.local.LocalStrategyEntity
 import com.example.data.local.PaperOrderEntity
-import com.example.data.model.MemoryTier
-import com.example.data.model.StrategyStage
 import com.example.data.model.VipModuleId
 import com.example.ui.components.CandleChartCanvas
 import com.example.ui.components.GlassCard
@@ -50,75 +43,13 @@ import com.example.ui.theme.IvoryText
 import com.example.ui.theme.LiveEmerald
 import com.example.ui.theme.MetallicGold
 import com.example.ui.theme.MetallicGoldBright
-import com.example.ui.theme.ObsidianBorder
 import com.example.ui.theme.ObsidianVoid
 import com.example.ui.theme.SimulatedAmber
 import com.example.ui.theme.SlateMuted
 import com.example.ui.viewmodel.AetherDashboardState
-import com.example.ui.viewmodel.AiTaskState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-@Composable
-fun StrategyArenaScreen(
-    state: AetherDashboardState,
-    onPromoteStrategy: (LocalStrategyEntity, StrategyStage) -> Unit,
-    onExecutePaper: (LocalStrategyEntity, String, Double) -> Unit,
-    onBack: () -> Unit
-) {
-    val ranked = remember(state.strategies) {
-        state.strategies.sortedByDescending {
-            it.sharpeRatio * 2.0 + it.profitFactor - (it.maxDrawdownPct * 0.25)
-        }
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item { ModuleHeader(VipModuleId.STRATEGY_CHAMPIONSHIP_ARENA, onBack) }
-        ranked.forEachIndexed { idx, strat ->
-            item(key = strat.id) {
-                val compositeScore = (strat.sharpeRatio * 20.0 + strat.profitFactor * 15.0 - strat.maxDrawdownPct * 2.0).coerceIn(0.0, 100.0)
-                GlassCard(borderColor = if (idx == 0) MetallicGold else ObsidianBorder) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("#${idx + 1} ${strat.name}", style = MaterialTheme.typography.titleSmall, color = MetallicGoldBright)
-                        Text("${String.format(Locale.US, "%.0f", compositeScore)} PTS", style = MaterialTheme.typography.labelLarge, color = LiveEmerald)
-                    }
-                    Text(
-                        "${strat.symbol} · Stage: ${strat.stage} · Sharpe ${String.format(Locale.US, "%.2f", strat.sharpeRatio)} · DD ${String.format(Locale.US, "%.1f%%", strat.maxDrawdownPct)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ChampagneSecondary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { onExecutePaper(strat, "BUY", 2.5) },
-                            colors = ButtonDefaults.buttonColors(containerColor = MetallicGold, contentColor = ObsidianVoid),
-                            modifier = Modifier.weight(1f).height(40.dp)
-                        ) {
-                            Text("Paper Trade 2.5%", style = MaterialTheme.typography.labelMedium)
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                val next = if (strat.stage == StrategyStage.PAPER_TRADING.name) StrategyStage.LIVE_ELIGIBLE else StrategyStage.PAPER_TRADING
-                                onPromoteStrategy(strat, next)
-                            },
-                            modifier = Modifier.weight(1f).height(40.dp)
-                        ) {
-                            Text("Advance Gate", style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                }
-            }
-        }
-        item { ModuleAuditLogCard(state.auditLogs, "CHAMPIONSHIP_ARENA") }
-    }
-}
 
 @Composable
 fun BrokerIntelligenceScreen(
@@ -393,107 +324,5 @@ fun QuantumAllocatorScreen(
             }
         }
         item { ModuleAuditLogCard(state.auditLogs, "RISK_MATRIX") }
-    }
-}
-
-@Composable
-fun CollectiveMemoryScreen(
-    state: AetherDashboardState,
-    onSaveMemory: (MemoryTier, String, String, String) -> Unit,
-    onQueryMemoryAi: (String) -> Unit,
-    onBack: () -> Unit
-) {
-    var queryText by remember { mutableStateOf("Which regimes or strategies showed the strongest edge?") }
-    var noteTitle by remember { mutableStateOf("") }
-    var noteBody by remember { mutableStateOf("") }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item { ModuleHeader(VipModuleId.COLLECTIVE_INTELLIGENCE_MEMORY, onBack) }
-        item {
-            GlassCard(borderColor = MetallicGold.copy(alpha = 0.45f)) {
-                Text("INVESTIGATE INSTITUTIONAL MEMORY", style = MaterialTheme.typography.titleSmall, color = MetallicGoldBright)
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = queryText,
-                    onValueChange = { queryText = it },
-                    label = { Text("Ask MEMORY MATRIX") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = { onQueryMemoryAi(queryText) },
-                    enabled = state.memorySynthesisState !is AiTaskState.Loading,
-                    colors = ButtonDefaults.buttonColors(containerColor = MetallicGold, contentColor = ObsidianVoid),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (state.memorySynthesisState is AiTaskState.Loading) "Synthesizing..." else "Query Memory Matrix")
-                }
-                when (val s = state.memorySynthesisState) {
-                    is AiTaskState.Success -> {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(s.data, style = MaterialTheme.typography.bodySmall, color = IvoryText)
-                    }
-                    is AiTaskState.Error -> {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(s.message, style = MaterialTheme.typography.bodySmall, color = CrimsonAlert)
-                    }
-                    else -> {}
-                }
-            }
-        }
-
-        item {
-            GlassCard {
-                Text("RECORD NEW MEMORY ENTRY", style = MaterialTheme.typography.titleSmall, color = MetallicGoldBright)
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = noteTitle,
-                    onValueChange = { noteTitle = it },
-                    label = { Text("Memory Title") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = noteBody,
-                    onValueChange = { noteBody = it },
-                    label = { Text("Observation / Regime Finding") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        if (noteTitle.isNotBlank() && noteBody.isNotBlank()) {
-                            onSaveMemory(MemoryTier.INTELLIGENCE_MEMORY, noteTitle, noteBody, state.selectedSymbol)
-                            noteTitle = ""
-                            noteBody = ""
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Commit to Room + Firestore")
-                }
-            }
-        }
-
-        state.memories.forEach { mem ->
-            item(key = mem.id) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = ObsidianVoid.copy(alpha = 0.75f),
-                    border = BorderStroke(1.dp, ObsidianBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("${mem.tier} · ${mem.symbol} · ${mem.agentName}", style = MaterialTheme.typography.labelSmall, color = MetallicGold)
-                        Text(mem.title, style = MaterialTheme.typography.titleSmall, color = IvoryText)
-                        Text(mem.content, style = MaterialTheme.typography.bodySmall, color = ChampagneSecondary)
-                    }
-                }
-            }
-        }
     }
 }

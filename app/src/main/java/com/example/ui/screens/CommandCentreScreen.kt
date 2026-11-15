@@ -93,6 +93,7 @@ fun CommandCentreScreen(
     onOpenConditions: () -> Unit,
     onOpenNarratives: () -> Unit = {},
     onOpenTradingTerminal: () -> Unit = {},
+    onOpenKnowledge: () -> Unit = {},
     onOpenModule: (VipModuleId) -> Unit
 ) {
     var selectedAssetFilter by remember { mutableStateOf<AssetClass?>(null) }
@@ -369,6 +370,46 @@ fun CommandCentreScreen(
                     } else {
                         "Tap to inspect live topic clustering, news-source splits, event timelines, decay & market reaction overlays."
                     },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ChampagneSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        // AETHERION Knowledge <-> Arena AI Card
+        item {
+            val ka = state.knowledgeArenaSnapshot
+            val topContender = ka.contenderRankings.firstOrNull()
+            GlassCard(
+                borderColor = MetallicGold.copy(alpha = 0.45f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onOpenKnowledge() }
+                    .testTag("home_knowledge_arena_card")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "AETHERION KNOWLEDGE ↔ ARENA AI",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MetallicGoldBright,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "${ka.linkedMemoryIds.size} LINKED →",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = LiveEmerald
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${ka.totalKnowledgeEntries} Playbooks (${ka.avgConfidencePct}% conf) feeding ${ka.contenderRankings.size} Arena contenders · #1: ${topContender?.strategy?.name ?: "Standby"}",
                     style = MaterialTheme.typography.bodySmall,
                     color = ChampagneSecondary,
                     maxLines = 2,

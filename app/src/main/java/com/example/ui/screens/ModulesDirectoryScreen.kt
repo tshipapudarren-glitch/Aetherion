@@ -55,6 +55,7 @@ fun ModulesDirectoryScreen(
     state: AetherDashboardState,
     onOpenNarratives: () -> Unit = {},
     onOpenTradingTerminal: () -> Unit = {},
+    onOpenKnowledge: () -> Unit = {},
     onOpenModule: (VipModuleId) -> Unit
 ) {
     var selectedLayer by remember { mutableStateOf<IntelligenceLayer?>(null) }
@@ -157,6 +158,35 @@ fun ModulesDirectoryScreen(
         }
 
         item {
+            val ka = state.knowledgeArenaSnapshot
+            val champ = ka.contenderRankings.firstOrNull()
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MetallicGoldContainer.copy(alpha = 0.35f),
+                border = BorderStroke(1.dp, MetallicGold.copy(alpha = 0.6f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { onOpenKnowledge() }
+                    .testTag("directory_knowledge_arena_card")
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "AETHERION KNOWLEDGE ↔ ARENA AI →",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MetallicGoldBright,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "${ka.totalKnowledgeEntries} Knowledge Playbooks (${ka.linkedMemoryIds.size} Arena-Linked) · #1: ${champ?.strategy?.name ?: "Contenders Ready"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IvoryText
+                    )
+                }
+            }
+        }
+
+        item {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
@@ -216,12 +246,19 @@ fun ModulesDirectoryScreen(
                 VipModuleId.BLACK_SWAN_PREDICTOR -> state.blackSwanAlerts.firstOrNull()?.let {
                     "Peak Tail: ${it.symbol} (${it.tailRiskScore}/100)"
                 } ?: "Awaiting candles"
-                VipModuleId.STRATEGY_CHAMPIONSHIP_ARENA -> "${state.strategies.count { it.stage == "PAPER_TRADING" || it.stage == "LIVE_ELIGIBLE" }} strategies graduated"
+                VipModuleId.STRATEGY_CHAMPIONSHIP_ARENA -> {
+                    val top = state.knowledgeArenaSnapshot.contenderRankings.firstOrNull()
+                    if (top != null) {
+                        "#1 ${top.strategy.name} (${String.format(Locale.US, "%.1f", top.compositeScore)} pts · +${String.format(Locale.US, "%.1f", top.knowledgeBuffPts)} Knowledge)"
+                    } else {
+                        "${state.strategies.size} Arena contenders · Knowledge-linked"
+                    }
+                }
                 VipModuleId.AUTONOMOUS_BROKER_INTELLIGENCE -> state.brokerHealth?.statusLabel
                     ?: "${state.paperOrders.count { it.status == "OPEN" }} Open Paper · MT5 Config"
                 VipModuleId.MARKET_TIME_RECONSTRUCTION -> "Replay Step ${state.timeReplayIndex} on ${state.selectedSymbol}"
                 VipModuleId.QUANTUM_CAPITAL_ALLOCATOR -> "${state.allocations.size} risk-parity budgets computed"
-                VipModuleId.COLLECTIVE_INTELLIGENCE_MEMORY -> "${state.memories.size} Room+Firestore memories stored"
+                VipModuleId.COLLECTIVE_INTELLIGENCE_MEMORY -> "${state.knowledgeArenaSnapshot.totalKnowledgeEntries} Playbooks · ${state.knowledgeArenaSnapshot.linkedMemoryIds.size} Linked to Arena AI"
                 VipModuleId.COMMANDER_VOICE_INTELLIGENCE -> "${state.voiceHistory.size} voice/command transcripts"
                 VipModuleId.AUTONOMOUS_RISK_DEFENCE_MATRIX -> if (state.constitution.emergencyKillSwitch)
                     "EMERGENCY KILL SWITCH ENGAGED"
